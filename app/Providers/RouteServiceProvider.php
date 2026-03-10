@@ -7,6 +7,7 @@ use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvi
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use App\Models\SearchList; // Add the SearchList model
 
 class RouteServiceProvider extends ServiceProvider
 {
@@ -27,6 +28,9 @@ class RouteServiceProvider extends ServiceProvider
     public function boot()
     {
         $this->configureRateLimiting();
+
+        // Explicit route model binding for SearchList
+        Route::model('searchList', SearchList::class); // Add this line
 
         $this->routes(function () {
             Route::middleware('api')

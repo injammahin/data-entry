@@ -29,4 +29,10 @@ class Record extends Model
     {
         return $this->belongsTo(Import::class);
     }
+
+    public function searchLists()
+    {
+        return $this->belongsToMany(SearchList::class, 'search_list_record')
+            ->withTimestamps();
+    }
 }
