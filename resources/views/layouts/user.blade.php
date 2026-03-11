@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+    <link href="{{ asset('/css/app.css') }}" rel="stylesheet"> <!-- Correct CSS file -->
 
     <style>
         :root{
@@ -34,7 +35,7 @@
         body{
             font-family:'Inter', sans-serif;
             background:
-                radial-gradient(circle at top left, rgba(74,168,255,.16), transparent 28%),
+                radial-gradient(circle at top left, rgba(74, 167, 255, 0.637), transparent 28%),
                 radial-gradient(circle at right center, rgba(70, 217, 168, .12), transparent 24%),
                 linear-gradient(180deg, #edf3fa 0%, #f7f9fc 100%);
             color:var(--text);
@@ -422,27 +423,11 @@
                 </div>
 
                 <div>
-                    <div class="brand-title">data <span>collector</span></div>
-                    <div class="brand-sub">user business panel</div>
+                    <img src={{ asset('/img/logo.png') }} alt="LeadGen" class="h-16">
                 </div>
             </div>
 
             <div class="topbar-actions">
-                <a href="javascript:void(0)" class="idea-btn">
-                    <i class="fa-regular fa-lightbulb"></i>
-                    Have an Idea?
-                </a>
-
-                <a href="javascript:void(0)" class="top-link">
-                    <i class="fa-solid fa-comments"></i>
-                    Live Chat
-                </a>
-
-                <a href="javascript:void(0)" class="top-link">
-                    <i class="fa-solid fa-circle-info"></i>
-                    Help
-                </a>
-
                 <div class="user-info-chip">
                     <div class="user-avatar">
                         {{ strtoupper(substr(auth()->user()->name ?? 'U', 0, 1)) }}

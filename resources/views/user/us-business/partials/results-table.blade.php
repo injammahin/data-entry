@@ -37,7 +37,7 @@
                         <i class="fa-solid fa-fire"></i>
                     </td>
 
-                    @foreach($visibleColumns as $header)
+                   @foreach($visibleColumns as $header)
                         @php
                             $value = is_array($record->data_json) ? ($record->data_json[$header] ?? '') : '';
                             $headerKey = strtolower(trim(str_replace(['-', ' '], '_', $header)));
@@ -46,8 +46,23 @@
                         <td class="sg-multiline">
                             @if($headerKey === 'business_name')
                                 <span class="sg-business-name">{{ $value }}</span>
+
                             @elseif(in_array($headerKey, ['executive_info', 'address']))
                                 {!! nl2br(e($value)) !!}
+
+                            @elseif($headerKey === 'email')
+                                {{ $value !== '' ? $value : 'No Email' }}
+
+                            @elseif($headerKey === 'email_status')
+                                <span style="font-weight:600;">
+                                    {{ $value }}
+                                </span>
+
+                            @elseif($headerKey === 'email_hash')
+                                <span style="word-break: break-all; white-space: normal;">
+                                    {{ $value }}
+                                </span>
+
                             @else
                                 {{ $value }}
                             @endif

@@ -66,7 +66,7 @@
 
                         <div class="sg-dropdown">
                             <button type="button" class="sg-action" data-export-toggle>
-                                <i class="fa-regular fa-file-export"></i>
+                                <i class="fa-solid fa-file-export"></i>
                                 <span>Export</span>
                             </button>
 
@@ -107,7 +107,7 @@
                             </div>
                         </div>
 
-                        <a href="javascript:void(0)" class="sg-action">
+                        {{-- <a href="javascript:void(0)" class="sg-action">
                             <i class="fa-solid fa-display"></i>
                             <span>Display Ads</span>
                         </a>
@@ -116,12 +116,12 @@
                             <i class="fa-solid fa-wand-magic-sparkles"></i>
                             <span>Intent Data</span>
                             <span class="new-badge">New</span>
-                        </a>
+                        </a> --}}
 
-                        <button type="button" class="sg-action" data-modal-open="columnsModal">
+                        {{-- <button type="button" class="sg-action" data-modal-open="columnsModal">
                             <i class="fa-solid fa-ellipsis"></i>
                             <span>More</span>
-                        </button>
+                        </button> --}}
                     </div>
                 </div>
             </div>

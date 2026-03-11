@@ -20,10 +20,10 @@ use Maatwebsite\Excel\Concerns\WithMapping;
 
 class BusinessController extends Controller
 {
-    private const STATES_CACHE_TTL = 86400;      // 24h
-    private const SEARCH_CACHE_TTL = 600;        // 10 min
-    private const PAGE_CACHE_TTL = 300;          // 5 min
-    private const SNAPSHOT_MAX_RECORDS = 10000;  // above this, do not snapshot pivot rows
+    private const STATES_CACHE_TTL = 86400;
+    private const SEARCH_CACHE_TTL = 600;
+    private const PAGE_CACHE_TTL = 300;
+    private const SNAPSHOT_MAX_RECORDS = 10000;
 
     private array $filterFields = [
         'business_name',
@@ -83,15 +83,10 @@ class BusinessController extends Controller
                 return [
                     'total_results' => (clone $baseQuery)->reorder()->count('records.id'),
                     'state_count' => (clone $baseQuery)->reorder()->distinct('records.state_id')->count('records.state_id'),
-                    'email_count' => $this->countFilledJsonField(
-                        clone $baseQuery,
-                        ['email', 'Email', 'EMAIL', 'email_address', 'Email Address'],
-                        true
-                    ),
-                    'direct_mail_count' => $this->countFilledJsonField(
-                        clone $baseQuery,
-                        ['address', 'Address', 'ADDRESS', 'street_address', 'Street Address', 'mailing_address', 'Mailing Address']
-                    ),
+                    'email_count' => $this->countEmailAvailable(clone $baseQuery),
+                    'real_email_count' => $this->countRealEmail(clone $baseQuery),
+                    'hashed_email_count' => $this->countHashedEmail(clone $baseQuery),
+                    'direct_mail_count' => $this->countDirectMail(clone $baseQuery),
                     'top_cities' => $this->topJsonValues(
                         clone $baseQuery,
                         ['city', 'City', 'CITY'],
@@ -197,11 +192,6 @@ class BusinessController extends Controller
             'total_records' => $totalRecords,
         ]);
 
-        /*
-         * FAST MODE:
-         * Large result sets should not create millions of pivot rows synchronously.
-         * Snapshot only smaller result sets; for large sets store smart criteria only.
-         */
         if ($totalRecords <= self::SNAPSHOT_MAX_RECORDS) {
             (clone $baseQuery)
                 ->select('records.id')
@@ -272,13 +262,98 @@ class BusinessController extends Controller
                 $row = [];
 
                 foreach ($this->visibleColumns as $column) {
-                    $value = $data[$column] ?? '';
+                    $value = $this->resolveColumnValue($data, $column);
                     $row[] = is_array($value)
                         ? json_encode($value)
                         : preg_replace("/\r\n|\r|\n/", ' ', (string) $value);
                 }
 
                 return $row;
+            }
+
+            private function resolveColumnValue(array $data, string $column): mixed
+            {
+                $normalized = strtolower(trim(str_replace(['-', ' '], '_', $column)));
+
+                if ($normalized === 'email') {
+                    return $this->extractActualEmail($data) ?? '';
+                }
+
+                if ($normalized === 'email_hash') {
+                    return $this->extractEmailHash($data) ?? '';
+                }
+
+                if ($normalized === 'email_status') {
+                    return $this->extractActualEmail($data)
+                        ? 'REAL EMAIL'
+                        : ($this->extractEmailHash($data) ? 'HASHED EMAIL ONLY' : '');
+                }
+
+                return $data[$column] ?? '';
+            }
+
+            private function extractActualEmail(array $data): ?string
+            {
+                $keys = [
+                    'email', 'Email', 'EMAIL',
+                    'email_address', 'Email Address', 'Email_Address',
+                ];
+
+                foreach ($keys as $key) {
+                    $value = $data[$key] ?? null;
+                    if (is_string($value) && str_contains($value, '@')) {
+                        return trim($value);
+                    }
+                }
+
+                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                    foreach ($data['contacts'] as $contact) {
+                        if (!is_array($contact)) {
+                            continue;
+                        }
+
+                        foreach (['email', 'Email', 'emailAddress', 'email_address'] as $key) {
+                            $value = $contact[$key] ?? null;
+                            if (is_string($value) && str_contains($value, '@')) {
+                                return trim($value);
+                            }
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            private function extractEmailHash(array $data): ?string
+            {
+                $keys = [
+                    'Email_Hash', 'email_hash', 'emailHash',
+                    'EMAIL_HASH',
+                ];
+
+                foreach ($keys as $key) {
+                    $value = $data[$key] ?? null;
+                    if (is_string($value) && trim($value) !== '') {
+                        return trim($value);
+                    }
+                }
+
+                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                    foreach ($data['contacts'] as $contact) {
+                        if (!is_array($contact)) {
+                            continue;
+                        }
+
+                        foreach (['emailHash', 'email_hash', 'Email_Hash'] as $key) {
+                            $value = $contact[$key] ?? null;
+                            if (is_string($value) && trim($value) !== '') {
+                                return trim($value);
+                            }
+                        }
+                    }
+                }
+
+                return null;
             }
         };
 
@@ -326,13 +401,98 @@ class BusinessController extends Controller
                 $row = [];
 
                 foreach ($this->visibleColumns as $column) {
-                    $value = $data[$column] ?? '';
+                    $value = $this->resolveColumnValue($data, $column);
                     $row[] = is_array($value)
                         ? json_encode($value)
                         : preg_replace("/\r\n|\r|\n/", ' ', (string) $value);
                 }
 
                 return $row;
+            }
+
+            private function resolveColumnValue(array $data, string $column): mixed
+            {
+                $normalized = strtolower(trim(str_replace(['-', ' '], '_', $column)));
+
+                if ($normalized === 'email') {
+                    return $this->extractActualEmail($data) ?? '';
+                }
+
+                if ($normalized === 'email_hash') {
+                    return $this->extractEmailHash($data) ?? '';
+                }
+
+                if ($normalized === 'email_status') {
+                    return $this->extractActualEmail($data)
+                        ? 'REAL EMAIL'
+                        : ($this->extractEmailHash($data) ? 'HASHED EMAIL ONLY' : '');
+                }
+
+                return $data[$column] ?? '';
+            }
+
+            private function extractActualEmail(array $data): ?string
+            {
+                $keys = [
+                    'email', 'Email', 'EMAIL',
+                    'email_address', 'Email Address', 'Email_Address',
+                ];
+
+                foreach ($keys as $key) {
+                    $value = $data[$key] ?? null;
+                    if (is_string($value) && str_contains($value, '@')) {
+                        return trim($value);
+                    }
+                }
+
+                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                    foreach ($data['contacts'] as $contact) {
+                        if (!is_array($contact)) {
+                            continue;
+                        }
+
+                        foreach (['email', 'Email', 'emailAddress', 'email_address'] as $key) {
+                            $value = $contact[$key] ?? null;
+                            if (is_string($value) && str_contains($value, '@')) {
+                                return trim($value);
+                            }
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            private function extractEmailHash(array $data): ?string
+            {
+                $keys = [
+                    'Email_Hash', 'email_hash', 'emailHash',
+                    'EMAIL_HASH',
+                ];
+
+                foreach ($keys as $key) {
+                    $value = $data[$key] ?? null;
+                    if (is_string($value) && trim($value) !== '') {
+                        return trim($value);
+                    }
+                }
+
+                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                    foreach ($data['contacts'] as $contact) {
+                        if (!is_array($contact)) {
+                            continue;
+                        }
+
+                        foreach (['emailHash', 'email_hash', 'Email_Hash'] as $key) {
+                            $value = $contact[$key] ?? null;
+                            if (is_string($value) && trim($value) !== '') {
+                                return trim($value);
+                            }
+                        }
+                    }
+                }
+
+                return null;
             }
         };
 
@@ -378,96 +538,99 @@ class BusinessController extends Controller
         return null;
     }
 
-    private function buildPageContext(Request $request, int $defaultPerPage, ?array $metricsOverride = null): array
-    {
-        $criteriaKey = $this->criteriaCacheKey($request);
-        $baseQuery = $this->buildFilteredQuery($request);
+private function buildPageContext(Request $request, int $defaultPerPage, ?array $metricsOverride = null): array
+{
+    $criteriaKey = $this->criteriaCacheKey($request);
+    $baseQuery = $this->buildFilteredQuery($request);
 
-        $perPage = (int) $request->get('per_page', $defaultPerPage);
-        $allowed = [12, 30, 50, 100];
+    $perPage = (int) $request->get('per_page', $defaultPerPage);
+    $allowed = [12, 30, 50, 100];
 
-        if (! in_array($perPage, $allowed, true)) {
-            $perPage = $defaultPerPage;
-        }
-
-        $page = max(1, (int) $request->get('page', 1));
-
-        $total = Cache::remember(
-            "user_business_total:{$criteriaKey}",
-            self::SEARCH_CACHE_TTL,
-            fn () => (clone $baseQuery)->reorder()->count('records.id')
-        );
-
-        $pageIds = [];
-
-        if ($total > 0) {
-            $pageIds = Cache::remember(
-                "user_business_page_ids:{$criteriaKey}:{$page}:{$perPage}",
-                self::PAGE_CACHE_TTL,
-                fn () => (clone $baseQuery)
-                    ->forPage($page, $perPage)
-                    ->pluck('records.id')
-                    ->all()
-            );
-        }
-
-        $pageRecords = $this->fetchRecordsByIds($pageIds);
-
-        $records = new LengthAwarePaginator(
-            $pageRecords,
-            $total,
-            $perPage,
-            $page,
-            [
-                'path' => url()->current(),
-                'query' => $request->query(),
-            ]
-        );
-
-        $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery, $pageRecords);
-        $visibleColumns = $this->resolveVisibleColumns($request, $headers);
-
-        $selectedState = null;
-        if ($request->filled('state_id')) {
-            $selectedState = Cache::remember(
-                'user_business_state_' . $request->state_id,
-                self::STATES_CACHE_TTL,
-                fn () => State::select('id', 'name')->find($request->state_id)
-            );
-        }
-
-        /*
-        * FAST MODE:
-        * Non-insight pages should not run heavy metric counts every time.
-        * Use override if provided, otherwise read from cache only.
-        */
-        if ($metricsOverride !== null) {
-            $metrics = [
-                'emailCount' => (int) ($metricsOverride['emailCount'] ?? 0),
-                'directMailCount' => (int) ($metricsOverride['directMailCount'] ?? 0),
-            ];
-
-            Cache::put("user_business_metrics:{$criteriaKey}", $metrics, self::SEARCH_CACHE_TTL);
-        } else {
-            $metrics = Cache::get("user_business_metrics:{$criteriaKey}", [
-                'emailCount' => 0,
-                'directMailCount' => 0,
-            ]);
-        }
-
-        return [
-            'records' => $records,
-            'headers' => $headers,
-            'visibleColumns' => $visibleColumns,
-            'availableColumns' => $headers,
-            'columnAliases' => $this->columnAliases(),
-            'activeFilters' => $this->activeFilters($request, $selectedState),
-            'selectedState' => $selectedState,
-            'emailCount' => $metrics['emailCount'] ?? 0,
-            'directMailCount' => $metrics['directMailCount'] ?? 0,
-            'perPage' => $perPage,
-        ];
+    if (! in_array($perPage, $allowed, true)) {
+        $perPage = $defaultPerPage;
     }
+
+    $page = max(1, (int) $request->get('page', 1));
+
+    $total = Cache::remember(
+        "user_business_total:{$criteriaKey}",
+        self::SEARCH_CACHE_TTL,
+        fn () => (clone $baseQuery)->reorder()->count('records.id')
+    );
+
+    $pageIds = [];
+
+    if ($total > 0) {
+        $pageIds = Cache::remember(
+            "user_business_page_ids:{$criteriaKey}:{$page}:{$perPage}",
+            self::PAGE_CACHE_TTL,
+            fn () => (clone $baseQuery)
+                ->forPage($page, $perPage)
+                ->pluck('records.id')
+                ->all()
+        );
+    }
+
+    $pageRecords = $this->fetchRecordsByIds($pageIds);
+
+    $records = new LengthAwarePaginator(
+        $pageRecords,
+        $total,
+        $perPage,
+        $page,
+        [
+            'path' => url()->current(),
+            'query' => $request->query(),
+        ]
+    );
+
+    $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery, $pageRecords);
+    $visibleColumns = $this->resolveVisibleColumns($request, $headers);
+
+    $selectedState = null;
+    if ($request->filled('state_id')) {
+        $selectedState = Cache::remember(
+            'user_business_state_' . $request->state_id,
+            self::STATES_CACHE_TTL,
+            fn () => State::select('id', 'name')->find($request->state_id)
+        );
+    }
+
+    $metricsCacheKey = "user_business_metrics:{$criteriaKey}:v2";
+
+    if ($metricsOverride !== null) {
+        $metrics = [
+            'emailCount' => (int) ($metricsOverride['emailCount'] ?? 0),
+            'directMailCount' => (int) ($metricsOverride['directMailCount'] ?? 0),
+        ];
+
+        Cache::put($metricsCacheKey, $metrics, self::SEARCH_CACHE_TTL);
+    } else {
+        $metrics = Cache::remember(
+            $metricsCacheKey,
+            self::SEARCH_CACHE_TTL,
+            function () use ($baseQuery) {
+                return [
+                    'emailCount' => $this->countEmailAvailable(clone $baseQuery),
+                    'directMailCount' => $this->countDirectMail(clone $baseQuery),
+                ];
+            }
+        );
+    }
+
+    return [
+        'records' => $records,
+        'headers' => $headers,
+        'visibleColumns' => $visibleColumns,
+        'availableColumns' => $headers,
+        'columnAliases' => $this->columnAliases(),
+        'activeFilters' => $this->activeFilters($request, $selectedState),
+        'selectedState' => $selectedState,
+        'emailCount' => $metrics['emailCount'] ?? 0,
+        'directMailCount' => $metrics['directMailCount'] ?? 0,
+        'perPage' => $perPage,
+    ];
+}
 
     private function buildFilteredQuery(Request $request): Builder
     {
@@ -571,12 +734,8 @@ class BusinessController extends Controller
 
         $query->where(function (Builder $innerQuery) use ($driver, $possibleKeys, $lowerValue, $value) {
             if ($driver === 'mysql') {
-                /*
-                 * FAST MODE:
-                 * Do NOT fallback to full raw data_json LIKE on MySQL.
-                 * That makes 100M-row scans much worse.
-                 */
                 $expr = $this->jsonCoalesceExpression($possibleKeys);
+
                 $innerQuery->whereRaw(
                     "LOWER(COALESCE({$expr}, '')) LIKE ?",
                     ['%' . $lowerValue . '%']
@@ -606,12 +765,35 @@ class BusinessController extends Controller
             ->with(['state:id,name'])
             ->whereIn('records.id', $ids)
             ->get()
+            ->map(function ($record) {
+                return $this->enrichRecordData($record);
+            })
             ->keyBy('id');
 
         return collect($ids)
             ->map(fn ($id) => $items->get($id))
             ->filter()
             ->values();
+    }
+
+    private function enrichRecordData(Record $record): Record
+    {
+        $data = is_array($record->data_json)
+            ? $record->data_json
+            : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
+
+        $actualEmail = $this->extractActualEmail($data);
+        $emailHash = $this->extractEmailHash($data);
+
+        $data['Email'] = $actualEmail ?? '';
+        $data['Email_Hash'] = $emailHash ?? '';
+        $data['Email_Status'] = $actualEmail
+            ? 'REAL EMAIL'
+            : ($emailHash ? 'HASHED EMAIL ONLY' : '');
+
+        $record->setAttribute('data_json', $data);
+
+        return $record;
     }
 
     private function getOrderedHeaders(
@@ -637,28 +819,51 @@ class BusinessController extends Controller
                 if (empty($headers)) {
                     $record = (clone $baseQuery)->first();
 
-                    if ($record && is_array($record->data_json)) {
-                        $headers = array_keys($record->data_json);
+                    if ($record) {
+                        $data = is_array($record->data_json)
+                            ? $record->data_json
+                            : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
+
+                        $data['Email'] = '';
+                        $data['Email_Hash'] = '';
+                        $data['Email_Status'] = '';
+
+                        $headers = array_keys($data);
                     }
                 }
 
-                return $this->orderHeaders($headers);
+                return $this->augmentAndOrderHeaders($headers);
             }
         );
     }
 
-    private function resolveVisibleColumns(Request $request, array $headers): array
-    {
-        $requested = $request->input('columns', []);
+private function resolveVisibleColumns(Request $request, array $headers): array
+{
+    $requested = $request->input('columns', []);
 
-        if (! is_array($requested) || empty($requested)) {
-            return $headers;
+    if (! is_array($requested) || empty($requested)) {
+        return array_values(array_filter($headers, function ($header) {
+            $normalized = strtolower(trim(str_replace(['-', ' '], '_', $header)));
+
+            return $normalized !== 'email_hash';
+        }));
+    }
+
+    return array_values(array_filter(
+        $headers,
+        fn ($header) => in_array($header, $requested, true)
+    ));
+}
+
+    private function augmentAndOrderHeaders(array $headers): array
+    {
+        foreach (['Email', 'Email_Hash', 'Email_Status'] as $virtualHeader) {
+            if (! in_array($virtualHeader, $headers, true)) {
+                $headers[] = $virtualHeader;
+            }
         }
 
-        return array_values(array_filter(
-            $headers,
-            fn ($header) => in_array($header, $requested, true)
-        ));
+        return $this->orderHeaders($headers);
     }
 
     private function orderHeaders(array $headers): array
@@ -676,6 +881,8 @@ class BusinessController extends Controller
             'sic_code',
             'sic_description',
             'email',
+            'email_hash',
+            'email_status',
         ];
 
         $normalizedHeaders = collect($headers)->map(function ($header) {
@@ -718,6 +925,91 @@ class BusinessController extends Controller
         ];
     }
 
+    private function countEmailAvailable(Builder $query): int
+    {
+        $driver = DB::connection()->getDriverName();
+        $countQuery = clone $query;
+        $countQuery->reorder();
+
+        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
+            if ($driver === 'mysql') {
+                $actualExpr = $this->jsonCoalesceExpression($this->actualEmailKeys());
+                $hashExpr = $this->jsonCoalesceExpression($this->emailHashKeys());
+
+                $innerQuery->whereRaw("
+                    (
+                        COALESCE({$actualExpr}, '') LIKE '%@%'
+                        OR NULLIF(TRIM(COALESCE({$hashExpr}, '')), '') IS NOT NULL
+                        OR records.data_json REGEXP '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}'
+                        OR records.data_json REGEXP '\"emailHash\"[[:space:]]*:[[:space:]]*\"[^\"]+\"'
+                    )
+                ");
+
+                return;
+            }
+
+            $innerQuery->where('records.data_json', 'like', '%@%')
+                ->orWhere('records.data_json', 'like', '%emailHash%');
+        })->count('records.id');
+    }
+
+    private function countRealEmail(Builder $query): int
+    {
+        $driver = DB::connection()->getDriverName();
+        $countQuery = clone $query;
+        $countQuery->reorder();
+
+        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
+            if ($driver === 'mysql') {
+                $actualExpr = $this->jsonCoalesceExpression($this->actualEmailKeys());
+
+                $innerQuery->whereRaw("
+                    (
+                        COALESCE({$actualExpr}, '') LIKE '%@%'
+                        OR records.data_json REGEXP '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}'
+                    )
+                ");
+
+                return;
+            }
+
+            $innerQuery->where('records.data_json', 'like', '%@%');
+        })->count('records.id');
+    }
+
+    private function countHashedEmail(Builder $query): int
+    {
+        $driver = DB::connection()->getDriverName();
+        $countQuery = clone $query;
+        $countQuery->reorder();
+
+        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
+            if ($driver === 'mysql') {
+                $hashExpr = $this->jsonCoalesceExpression($this->emailHashKeys());
+
+                $innerQuery->whereRaw("
+                    (
+                        NULLIF(TRIM(COALESCE({$hashExpr}, '')), '') IS NOT NULL
+                        OR records.data_json REGEXP '\"emailHash\"[[:space:]]*:[[:space:]]*\"[^\"]+\"'
+                    )
+                ");
+
+                return;
+            }
+
+            $innerQuery->where('records.data_json', 'like', '%emailHash%')
+                ->orWhere('records.data_json', 'like', '%Email_Hash%');
+        })->count('records.id');
+    }
+
+    private function countDirectMail(Builder $query): int
+    {
+        return $this->countFilledJsonField(
+            $query,
+            ['address', 'Address', 'ADDRESS', 'street_address', 'Street Address', 'mailing_address', 'Mailing Address']
+        );
+    }
+
     private function countFilledJsonField(Builder $query, array $possibleKeys, bool $mustContainAt = false): int
     {
         $driver = DB::connection()->getDriverName();
@@ -758,12 +1050,6 @@ class BusinessController extends Controller
         $labelExpr = "COALESCE({$expr}, 'N/A')";
 
         $aggregateQuery = clone $query;
-
-        /*
-        * IMPORTANT:
-        * Remove inherited order/select from base query.
-        * Otherwise ONLY_FULL_GROUP_BY fails because records.id stays in SELECT/ORDER BY.
-        */
         $aggregateQuery->reorder();
         $aggregateQuery->getQuery()->columns = null;
 
@@ -785,6 +1071,86 @@ class BusinessController extends Controller
         }
 
         return 'COALESCE(' . implode(', ', $pieces) . ')';
+    }
+
+    private function actualEmailKeys(): array
+    {
+        return [
+            'email',
+            'Email',
+            'EMAIL',
+            'email_address',
+            'Email Address',
+            'Email_Address',
+        ];
+    }
+
+    private function emailHashKeys(): array
+    {
+        return [
+            'Email_Hash',
+            'email_hash',
+            'emailHash',
+            'EMAIL_HASH',
+        ];
+    }
+
+    private function extractActualEmail(array $data): ?string
+    {
+        foreach ($this->actualEmailKeys() as $key) {
+            $value = $data[$key] ?? null;
+
+            if (is_string($value) && str_contains($value, '@')) {
+                return trim($value);
+            }
+        }
+
+        if (!empty($data['contacts']) && is_array($data['contacts'])) {
+            foreach ($data['contacts'] as $contact) {
+                if (!is_array($contact)) {
+                    continue;
+                }
+
+                foreach (['email', 'Email', 'emailAddress', 'email_address'] as $key) {
+                    $value = $contact[$key] ?? null;
+
+                    if (is_string($value) && str_contains($value, '@')) {
+                        return trim($value);
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function extractEmailHash(array $data): ?string
+    {
+        foreach ($this->emailHashKeys() as $key) {
+            $value = $data[$key] ?? null;
+
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        if (!empty($data['contacts']) && is_array($data['contacts'])) {
+            foreach ($data['contacts'] as $contact) {
+                if (!is_array($contact)) {
+                    continue;
+                }
+
+                foreach (['emailHash', 'email_hash', 'Email_Hash'] as $key) {
+                    $value = $contact[$key] ?? null;
+
+                    if (is_string($value) && trim($value) !== '') {
+                        return trim($value);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private function headerLabel(string $header): string
@@ -811,6 +1177,8 @@ class BusinessController extends Controller
             'sic_code' => 'SIC CODE',
             'sic_description' => 'SIC DESCRIPTION',
             'email' => 'EMAIL',
+            'email_hash' => 'EMAIL HASH',
+            'email_status' => 'EMAIL STATUS',
         ];
     }
 

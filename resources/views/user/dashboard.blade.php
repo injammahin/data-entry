@@ -239,61 +239,6 @@
 @endpush
 
 @section('content')
-    {{-- <div class="panel hero-card">
-        <div class="dashboard-hero">
-            <div class="welcome-box">
-                <div class="soft-badge">
-                    <i class="fa-solid fa-sparkles"></i>
-                    Premium User Workspace
-                </div>
-
-                <h1 class="section-title" style="margin-top:18px;">
-                    Welcome back, {{ auth()->user()->name }}
-                </h1>
-
-                <p class="section-subtitle">
-                    Your user dashboard is now redesigned in a premium animated style.
-                    Start with <strong>U.S. Business</strong> to open the business filter page
-                    and search by company, executive name, state, city, address, ZIP and phone.
-                </p>
-
-                <div class="hero-actions">
-                    <a href="{{ route('user.us-business.index') }}" class="btn-primary-soft">
-                        <i class="fa-solid fa-building"></i>
-                        Open U.S. Business
-                    </a>
-
-                    <a href="{{ route('user.dashboard') }}" class="btn-dark-soft">
-                        <i class="fa-solid fa-gauge-high"></i>
-                        Refresh Dashboard
-                    </a>
-                </div>
-            </div>
-
-            <div class="hero-stats">
-                <div class="stat-card">
-                    <div class="label">Saved Searches</div>
-                    <div class="value">03</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="label">Active Database</div>
-                    <div class="value" style="font-size:22px;">U.S. Business</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="label">Quick Search Mode</div>
-                    <div class="value" style="font-size:22px;">Ready</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="label">Account Role</div>
-                    <div class="value" style="font-size:22px;">User</div>
-                </div>
-            </div>
-        </div>
-    </div> --}}
-
     <div class="panel section-panel">
         <div class="table-header" style="margin-bottom:26px;">
             <div>
