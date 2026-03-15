@@ -3,285 +3,260 @@
 @section('title', 'User Dashboard')
 
 @push('styles')
-<style>
-    .dashboard-grid{
-        display:grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap:24px;
-        margin-top:10px;
-    }
-
-    .quick-card{
-        text-align:center;
-        padding:26px 18px 20px;
-        border-radius:22px;
-        background:rgba(255,255,255,.72);
-        border:1px solid rgba(32, 57, 96, .08);
-        transition:.35s ease;
-        position:relative;
-        overflow:hidden;
-    }
-
-    .quick-card::before{
-        content:"";
-        position:absolute;
-        inset:auto -30px -40px auto;
-        width:110px;
-        height:110px;
-        background:radial-gradient(circle, rgba(74,168,255,.14), transparent 68%);
-        pointer-events:none;
-    }
-
-    .quick-card:hover{
-        transform:translateY(-8px);
-        box-shadow:0 20px 40px rgba(41, 72, 129, .15);
-    }
-
-    .quick-card.disabled{
-        opacity:.88;
-    }
-
-    .quick-card .circle-icon{
-        width:86px;
-        height:86px;
-        border-radius:50%;
-        margin:0 auto 18px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:34px;
-        color:#fff;
-        background:linear-gradient(135deg, #7cc8ff, #3f89ff);
-        box-shadow:
-            0 0 0 8px rgba(85, 164, 255, .10),
-            0 18px 30px rgba(55, 125, 255, .22);
-        animation:floaty 4s ease-in-out infinite;
-    }
-
-    .quick-card:nth-child(2) .circle-icon{
-        background:linear-gradient(135deg, #ffd95d, #f7b500);
-    }
-
-    .quick-card:nth-child(3) .circle-icon{
-        background:linear-gradient(135deg, #a9ecff, #65c9ff);
-    }
-
-    .quick-card:nth-child(4) .circle-icon{
-        background:linear-gradient(135deg, #ff8b55, #ff6224);
-    }
-
-    .quick-card:nth-child(5) .circle-icon{
-        background:linear-gradient(135deg, #c4d0da, #93a7b7);
-    }
-
-    .quick-card h4{
-        font-size:22px;
-        margin-bottom:10px;
-        font-weight:800;
-        letter-spacing:-0.03em;
-    }
-
-    .quick-card p{
-        font-size:14px;
-        color:#5d6d84;
-        line-height:1.75;
-        max-width:240px;
-        margin:0 auto;
-    }
-
-    .section-panel{
-        padding:30px;
-        margin-bottom:26px;
-    }
-
-    .table-panel{
-        padding:26px;
-    }
-
-    .table-header{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        margin-bottom:18px;
-        flex-wrap:wrap;
-    }
-
-    .table-header h3{
-        font-size:28px;
-        font-weight:800;
-        display:flex;
-        align-items:center;
-        gap:12px;
-    }
-
-    .soft-badge{
-        display:inline-flex;
-        align-items:center;
-        gap:8px;
-        padding:10px 14px;
-        border-radius:999px;
-        background:rgba(74,168,255,.12);
-        color:#2c6fe8;
-        font-weight:800;
-        font-size:13px;
-    }
-
-    .dashboard-hero{
-        display:grid;
-        grid-template-columns: 1.2fr .8fr;
-        gap:24px;
-        align-items:center;
-    }
-
-    .welcome-box{
-        position:relative;
-        z-index:2;
-    }
-
-    .hero-stats{
-        display:grid;
-        grid-template-columns:repeat(2, 1fr);
-        gap:16px;
-    }
-
-    .stat-card{
-        background:rgba(255,255,255,.72);
-        border:1px solid rgba(32, 57, 96, .08);
-        border-radius:20px;
-        padding:20px;
-        box-shadow:0 18px 35px rgba(24, 48, 93, .08);
-    }
-
-    .stat-card .label{
-        font-size:13px;
-        color:#70819b;
-        margin-bottom:6px;
-        font-weight:700;
-    }
-
-    .stat-card .value{
-        font-size:30px;
-        font-weight:800;
-        letter-spacing:-0.04em;
-    }
-
-    .hero-actions{
-        margin-top:18px;
-        display:flex;
-        gap:12px;
-        flex-wrap:wrap;
-    }
-
-    .btn-primary-soft,
-    .btn-dark-soft{
-        display:inline-flex;
-        align-items:center;
-        gap:10px;
-        border-radius:14px;
-        padding:14px 18px;
-        font-weight:800;
-        font-size:14px;
-        transition:.3s ease;
-    }
-
-    .btn-primary-soft{
-        color:#fff;
-        background:linear-gradient(135deg, #53b6ff, #2a74ff);
-        box-shadow:0 14px 24px rgba(49, 120, 255, .28);
-    }
-
-    .btn-dark-soft{
-        background:rgba(25, 34, 53, .08);
-        color:#1f304d;
-        border:1px solid rgba(25, 34, 53, .08);
-    }
-
-    .btn-primary-soft:hover,
-    .btn-dark-soft:hover{
-        transform:translateY(-3px);
-    }
-
-    @keyframes floaty{
-        0%,100%{ transform:translateY(0); }
-        50%{ transform:translateY(-8px); }
-    }
-
-    @media (max-width: 1200px){
-        .dashboard-grid{
-            grid-template-columns: repeat(3, 1fr);
+    <style>
+        :root {
+            --bg: #f4f7fa;
+            /* Light background */
+            --card-bg: rgba(255, 255, 255, .92);
+            --line: rgba(14, 30, 63, .08);
+            --text: #333;
+            --primary: #084b90;
+            /* Dark blue */
+            --secondary: #ff8c3d;
+            --accent: #2ecc71;
+            --shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+            --border-radius: 12px;
+            /* Slightly rounded edges */
         }
 
-        .dashboard-hero{
-            grid-template-columns:1fr;
-        }
-    }
-
-    @media (max-width: 767px){
-        .dashboard-grid{
-            grid-template-columns:1fr;
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
         }
 
-        .section-panel,
-        .table-panel{
-            padding:20px;
+        /* Header */
+        .dashboard-header {
+            background: var(--primary);
+            color: #fff;
+            padding: 30px 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 30px;
         }
 
-        .hero-stats{
-            grid-template-columns:1fr;
+        .dashboard-header h2 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 10px;
         }
 
-        .quick-card h4{
-            font-size:20px;
+        .dashboard-header p {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
         }
-    }
-</style>
+
+        /* Quick Action Cards */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            margin-top: 30px;
+        }
+
+        .quick-card {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            text-align: start;
+            transition: transform 0.3s ease-in-out;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .quick-card:hover {
+            transform: translateY(-8px);
+        }
+
+        .quick-card .icon {
+            font-size: 36px;
+            color: #fff;
+            border-radius: 50%;
+            width: 70px;
+            height: 70px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #5c9fdd, #2d89d0);
+            box-shadow:
+                0 0 0 8px rgba(85, 164, 255, .10),
+                0 18px 30px rgba(55, 125, 255, .22);
+            transition: transform 0.3s ease;
+        }
+
+        .quick-card .icon:hover {
+            transform: scale(1.1);
+        }
+
+        .quick-card h4 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            font-weight: 700;
+            color: #084b90;
+        }
+
+        .quick-card p {
+            font-size: 14px;
+            color: #777;
+            line-height: 1.75;
+            max-width: 240px;
+            margin: 0 auto;
+        }
+
+        .quick-card.disabled {
+            opacity: .7;
+        }
+
+        /* Hero Stats */
+        .hero-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .stat-card .label {
+            font-size: 14px;
+            color: #777;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        /* Table Panel */
+        .table-panel {
+            margin-top: 30px;
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .table-header h3 {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .table-header .badge {
+            background-color: var(--secondary);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table th,
+        table td {
+            padding: 12px;
+            text-align: left;
+            font-size: 14px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        table th {
+            background: #f7f7f7;
+            font-weight: 700;
+        }
+
+        table tbody tr:hover {
+            background: rgba(74, 168, 255, 0.1);
+        }
+
+        /* Buttons */
+        .btn-primary-soft {
+            background: var(--primary);
+            color: #fff;
+            padding: 12px 18px;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: 0.3s ease;
+        }
+
+        .btn-primary-soft:hover {
+            background: #1d5379;
+        }
+
+        .table-wrap {
+            overflow: auto;
+            border-radius: 16px;
+        }
+
+        @media (max-width: 1200px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+
+            .hero-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .table-header {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
 @endpush
 
 @section('content')
-    <div class="panel section-panel">
-        <div class="table-header" style="margin-bottom:26px;">
-            <div>
-                <h3>
-                    <i class="fa-solid fa-grid-2"></i>
-                    Main Features
-                </h3>
-                <p class="section-subtitle" style="margin-top:8px;">
-                    Styled close to your reference layout, but enhanced with animation,
-                    glassmorphism, hover transitions and premium icon cards.
-                </p>
-            </div>
-        </div>
-
-        <div class="dashboard-grid">
-            @foreach($quickActions as $action)
-                <a href="{{ $action['url'] }}"
-                   class="quick-card {{ !$action['active'] ? 'disabled' : '' }}"
-                   @if(!$action['active']) onclick="return false;" @endif>
-                    <div class="circle-icon">
-                        <i class="fa-solid {{ $action['icon'] }}"></i>
-                    </div>
-
-                    <h4>{{ $action['title'] }}</h4>
-                    <p>{{ $action['description'] }}</p>
-                </a>
-            @endforeach
-        </div>
+    <!-- Dashboard Header -->
+    <div class="dashboard-header">
+        <h2>Welcome, {{ auth()->user()->name }}!</h2>
+        <p>Your dashboard overview and quick actions at a glance</p>
     </div>
 
-    <div class="panel table-panel">
+    <!-- Quick Actions Section -->
+    <div class="dashboard-grid ">
+        @foreach($quickActions as $action)
+            <a href="{{ $action['url'] }}" class="quick-card {{ !$action['active'] ? 'disabled' : '' }}" @if(!$action['active'])
+            onclick="return false;" @endif>
+                <div class="icon">
+                    <i class="fa-solid {{ $action['icon'] }}"></i>
+                </div>
+                <h4>{{ $action['title'] }}</h4>
+                <p>{{ $action['description'] }}</p>
+            </a>
+        @endforeach
+    </div>
+
+    <!-- Table Section -->
+    <div class="table-panel">
         <div class="table-header">
-            <h3>
-                <i class="fa-solid fa-bookmark"></i>
-                Saved Searches ({{ count($savedSearches) }})
-            </h3>
-
-            <div class="soft-badge">
-                <i class="fa-solid fa-database"></i>
-                Business data ready
-            </div>
+            <h3>Saved Searches</h3>
+            <span class="badge">{{ count($savedSearches) }} Items</span>
         </div>
-
         <div class="table-wrap">
             <table>
                 <thead>
@@ -297,9 +272,7 @@
                     @foreach($savedSearches as $search)
                         <tr>
                             <td>
-                                <a href="{{ route('saved-lists.open', $search) }}" class="table-link">
-                                    {{ $search['name'] }}
-                                </a>
+                                <a href="{{ route('saved-lists.open', $search) }}" class="table-link">{{ $search['name'] }}</a>
                             </td>
                             <td>{{ $search['count'] }}</td>
                             <td>{{ $search['database'] }}</td>

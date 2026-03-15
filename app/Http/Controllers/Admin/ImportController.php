@@ -22,7 +22,6 @@ class ImportController extends Controller
     public function create()
     {
         $states = State::orderBy('name')->get();
-
         return view('admin.imports.create', compact('states'));
     }
 
@@ -37,8 +36,10 @@ class ImportController extends Controller
         $path = $file->store('imports');
         $fullPath = storage_path('app/' . $path);
 
+        // Generate the file hash for checking if the file already exists
         $fileHash = hash_file('sha256', $fullPath);
 
+        // Check if the file is already uploaded for the same state
         $existingImport = Import::where('state_id', $request->state_id)
             ->where('file_hash', $fileHash)
             ->first();
@@ -49,8 +50,8 @@ class ImportController extends Controller
             ])->withInput();
         }
 
+        // Open the file to verify headers
         $handle = fopen($fullPath, 'r');
-
         if ($handle === false) {
             return back()->withErrors([
                 'csv_file' => 'Unable to open uploaded file.',
@@ -68,6 +69,7 @@ class ImportController extends Controller
 
         $headers = array_map(fn ($header) => trim((string) $header), $headers);
 
+        // Create the import entry
         $import = Import::create([
             'state_id' => $request->state_id,
             'file_name' => $path,
@@ -78,6 +80,7 @@ class ImportController extends Controller
             'created_by' => auth()->id(),
         ]);
 
+        // Dispatch the job to process the CSV file
         ProcessCsvImportJob::dispatch($import->id);
 
         return redirect()
@@ -88,27 +91,18 @@ class ImportController extends Controller
     public function show(Import $import)
     {
         $import->load('state', 'user');
-
-        $records = $import->records()
-            ->latest()
-            ->paginate(20);
-
+        $records = $import->records()->latest()->paginate(20);
         return view('admin.imports.show', compact('import', 'records'));
     }
 
     public function records(Request $request, Import $import)
     {
         $perPage = (int) $request->get('per_page', 30);
-
         if (!in_array($perPage, [30, 50, 100])) {
             $perPage = 30;
         }
 
-        $records = $import->records()
-            ->orderBy('id')
-            ->paginate($perPage)
-            ->appends($request->query());
-
+        $records = $import->records()->orderBy('id')->paginate($perPage)->appends($request->query());
         $headers = is_array($import->headers) ? $import->headers : [];
 
         return view('admin.imports.records', compact('import', 'records', 'headers', 'perPage'));
@@ -122,8 +116,8 @@ class ImportController extends Controller
             ]);
         }
 
+        // Reset records for retry
         $import->records()->delete();
-
         $import->update([
             'status' => 'pending',
             'processed_rows' => 0,
@@ -135,6 +129,7 @@ class ImportController extends Controller
             'completed_at' => null,
         ]);
 
+        // Dispatch job to process again
         ProcessCsvImportJob::dispatch($import->id);
 
         return back()->with('success', 'Import retry started.');

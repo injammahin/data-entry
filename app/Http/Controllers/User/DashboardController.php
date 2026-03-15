@@ -1,7 +1,10 @@
 <?php
 
 namespace App\Http\Controllers\User;
+
 use App\Models\SearchList;
+use App\Models\State;
+use App\Models\Import;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 
@@ -9,6 +12,7 @@ class DashboardController extends Controller
 {
     public function index()
     {
+        // Define the quick actions
         $quickActions = [
             [
                 'title' => 'U.S. Business',
@@ -47,10 +51,17 @@ class DashboardController extends Controller
             ],
         ];
 
+        // Get saved searches for the current user
         $savedSearches = SearchList::where('user_id', auth()->id())->get();
-        return view('user.dashboard', compact('quickActions', 'savedSearches'));
+
+        // Get the total count for states and imports
+        $totalStates = State::count();
+        $totalImports = Import::count();
+
+        // Pass data to the view
+        return view('user.dashboard', compact('quickActions', 'savedSearches', 'totalStates', 'totalImports'));
     }
-    
+
     public function openSavedList(SearchList $searchList)
     {
         // Ensure that the search belongs to the logged-in user

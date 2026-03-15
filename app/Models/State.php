@@ -14,7 +14,11 @@ class State extends Model
         'slug',
     ];
     public function imports()
-{
-    return $this->hasMany(Import::class);
-}
+    {
+        return $this->hasMany(Import::class);
+    }
+   public function records()
+    {
+        return $this->hasMany(Record::class);
+    }
 }

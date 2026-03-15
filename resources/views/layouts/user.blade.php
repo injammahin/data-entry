@@ -336,7 +336,7 @@
         .mini-nav a.active,
         .mini-nav a:hover {
             color: #fff;
-            background: linear-gradient(135deg, #4faeff, #286fff);
+            background: linear-gradient(135deg, #084b90, #084b90);
             transform: translateY(-2px);
             box-shadow: 0 12px 25px rgba(54, 120, 255, .2);
         }
@@ -498,51 +498,44 @@
 <body>
     <header class="user-topbar" id="userTopbar">
         <div class="topbar-inner">
+            <!-- Brand Section -->
             <div class="brand-wrap">
-                <div class="brand-logo grid justify-between">
+                <div class="brand-logo">
                     <i class="fa-solid fa-database"></i>
                 </div>
-
                 <div>
-                    <img src={{ asset('/img/logo.png') }} alt="LeadGen" class="h-16">
-
-
-                </div>
-
-                <div class="topbar-actions">
-                    <div class="user-info-chip">
-                        <div class="user-avatar">
-                            {{ strtoupper(substr(auth()->user()->name ?? 'U', 0, 1)) }}
-                        </div>
-                        <div>
-                            <div style="font-size:13px; color:#8a98ad;">Signed in as</div>
-                            <div style="font-size:14px; font-weight:800; color:#111827;">{{ auth()->user()->name }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <form method="POST" action="{{ route('logout') }}">
-                        @csrf
-                        <button type="submit" class="logout-btn">
-                            <i class="fa-solid fa-right-from-bracket"></i>
-                            Logout
-                        </button>
-                    </form>
+                    <img src="{{ asset('/img/logo.png') }}" alt="LeadGen" class="h-16">
                 </div>
             </div>
+
+            <!-- User Info Section -->
+            <div class="topbar-actions">
+                <div class="user-info-chip">
+                    <!-- User Avatar -->
+                    <div class="user-avatar">
+                        {{ strtoupper(substr(auth()->user()->name ?? 'U', 0, 1)) }}
+                    </div>
+                    <!-- User Info -->
+                    <div>
+                        <div style="font-size: 13px; color: #8a98ad;">Signed in as</div>
+                        <div style="font-size: 14px; font-weight: 800; color: #111827;">
+                            {{ auth()->user()->name }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logout Button -->
+                <form method="POST" action="{{ route('logout') }}">
+                    @csrf
+                    <button type="submit" class="logout-btn">
+                        <i class="fa-solid fa-right-from-bracket"></i> Logout
+                    </button>
+                </form>
+            </div>
+        </div>
     </header>
 
     <main class="user-shell @yield('shell_class')">
-        <div class="notify-banner">
-            <div class="banner-text">
-                New! Discover businesses with buying intent
-                <a href="javascript:void(0)">Learn More</a>
-            </div>
-            <div>
-                <i class="fa-solid fa-xmark"></i>
-            </div>
-        </div>
-
         <div class="mini-nav">
             <a href="{{ route('user.dashboard') }}" class="{{ request()->routeIs('user.dashboard') ? 'active' : '' }}">
                 <i class="fa-solid fa-house"></i>

@@ -49,7 +49,6 @@ class ProcessCsvImportJob implements ShouldQueue
         }
 
         $handle = fopen($filePath, 'r');
-
         if ($handle === false) {
             $import->update([
                 'status' => 'failed',
@@ -60,10 +59,8 @@ class ProcessCsvImportJob implements ShouldQueue
         }
 
         $headers = fgetcsv($handle);
-
         if (!$headers || count($headers) === 0) {
             fclose($handle);
-
             $import->update([
                 'status' => 'failed',
                 'error_message' => 'CSV header row is missing or invalid.',
@@ -73,10 +70,7 @@ class ProcessCsvImportJob implements ShouldQueue
         }
 
         $headers = $this->normalizeHeaders($headers);
-
-        $import->update([
-            'headers' => $headers,
-        ]);
+        $import->update(['headers' => $headers]);
 
         $batch = [];
         $processed = 0;
@@ -84,7 +78,7 @@ class ProcessCsvImportJob implements ShouldQueue
         $skipped = 0;
         $total = 0;
         $rowNumber = 1;
-        $chunkSize = 1000;
+        $chunkSize = 1000; // Adjust the chunk size to optimize database performance
 
         while (($row = fgetcsv($handle)) !== false) {
             $rowNumber++;
@@ -102,7 +96,6 @@ class ProcessCsvImportJob implements ShouldQueue
             }
 
             $combined = array_combine($headers, $row);
-
             if ($combined === false) {
                 $skipped++;
                 continue;
@@ -119,7 +112,6 @@ class ProcessCsvImportJob implements ShouldQueue
 
             if (count($batch) >= $chunkSize) {
                 DB::table('records')->insert($batch);
-
                 $successful += count($batch);
 
                 $import->update([
@@ -129,10 +121,11 @@ class ProcessCsvImportJob implements ShouldQueue
                     'total_rows' => $total,
                 ]);
 
-                $batch = [];
+                $batch = []; // Reset batch after inserting
             }
         }
 
+        // Insert remaining records after loop
         if (!empty($batch)) {
             DB::table('records')->insert($batch);
             $successful += count($batch);
@@ -154,24 +147,19 @@ class ProcessCsvImportJob implements ShouldQueue
     {
         $cleaned = [];
         $used = [];
-
         foreach ($headers as $index => $header) {
             $header = trim((string) $header);
-
             if ($header === '') {
                 $header = 'column_' . ($index + 1);
             }
-
             $header = preg_replace('/\s+/', '_', $header);
             $header = preg_replace('/[^A-Za-z0-9_\-]/', '', $header);
-
             if ($header === '') {
                 $header = 'column_' . ($index + 1);
             }
 
             $base = $header;
             $counter = 2;
-
             while (in_array($header, $used, true)) {
                 $header = $base . '_' . $counter;
                 $counter++;
@@ -180,7 +168,6 @@ class ProcessCsvImportJob implements ShouldQueue
             $used[] = $header;
             $cleaned[] = $header;
         }
-
         return $cleaned;
     }
 
@@ -191,14 +178,12 @@ class ProcessCsvImportJob implements ShouldQueue
                 return false;
             }
         }
-
         return true;
     }
 
     public function failed(Throwable $exception): void
     {
         $import = Import::find($this->importId);
-
         if ($import) {
             $import->update([
                 'status' => 'failed',
