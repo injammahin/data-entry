@@ -7,6 +7,26 @@
         $normalized = strtolower(trim(str_replace(['-', ' '], '_', $header)));
         return $columnAliases[$normalized] ?? strtoupper(str_replace('_', ' ', $header));
     };
+
+    $cellValue = function ($record, $column) {
+        $data = is_array($record->data_json ?? null) ? $record->data_json : [];
+
+        $normalized = strtolower(trim(str_replace(['-', ' '], '_', $column)));
+
+        if ($normalized === 'email') {
+            return $data['Email'] ?? $data['email'] ?? '';
+        }
+
+        if ($normalized === 'email_hash') {
+            return $data['Email_Hash'] ?? $data['email_hash'] ?? '';
+        }
+
+        if ($normalized === 'email_status') {
+            return $data['Email_Status'] ?? '';
+        }
+
+        return $data[$column] ?? '';
+    };
 @endphp
 
 <div class="sg-grid-wrap">
@@ -21,19 +41,17 @@
                     <i class="fa-solid fa-fire"></i>
                 </th>
 
-                @foreach($visibleColumns as $header)
+                @foreach ($visibleColumns as $header)
                     <th>{{ $headerLabel($header) }}</th>
                 @endforeach
             </tr>
         </thead>
 
         <tbody>
-            @forelse($records as $index => $record)
+            @forelse ($records as $index => $record)
                 @php
                     $rowNumber = $rowStart + $index;
-                    $data = is_array($record->data_json ?? null) ? $record->data_json : [];
-
-                    $emailStatus = $data['Email_Status'] ?? '';
+                    $emailStatus = data_get($record->data_json, 'Email_Status', '');
                     $rowStatusClass = $emailStatus === 'REAL EMAIL'
                         ? 'real-email'
                         : ($emailStatus === 'HASHED EMAIL ONLY' ? 'hashed-email' : 'no-email');
@@ -50,9 +68,9 @@
                         <span class="sg-status-dot {{ $rowStatusClass }}"></span>
                     </td>
 
-                    @foreach($visibleColumns as $column)
+                    @foreach ($visibleColumns as $column)
                         @php
-                            $value = $data[$column] ?? '';
+                            $value = $cellValue($record, $column);
 
                             if (is_array($value)) {
                                 $value = json_encode($value);

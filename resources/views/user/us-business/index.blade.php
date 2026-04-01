@@ -435,6 +435,7 @@
             <h2>Find a Business</h2>
             <p>
                 Fill out one or more of the following search fields.
+                Fast search uses indexed fields. For best speed, type the beginning of the value.
             </p>
 
             @if(session('error'))
@@ -448,17 +449,20 @@
 
                 <div class="field-row">
                     <label class="field-label">Business Name</label>
-                    <input type="text" name="business_name" class="form-control" placeholder="Enter a company name">
+                    <input type="text" name="business_name" class="form-control" placeholder="Start typing company name"
+                        value="{{ request('business_name') }}">
                 </div>
 
                 <div class="field-row">
                     <label class="field-label">Executive First Name</label>
-                    <input type="text" name="executive_first_name" class="form-control" placeholder="First Name">
+                    <input type="text" name="executive_first_name" class="form-control"
+                        placeholder="Start typing first name" value="{{ request('executive_first_name') }}">
                 </div>
 
                 <div class="field-row">
                     <label class="field-label">Executive Last Name</label>
-                    <input type="text" name="executive_last_name" class="form-control" placeholder="Last Name">
+                    <input type="text" name="executive_last_name" class="form-control" placeholder="Start typing last name"
+                        value="{{ request('executive_last_name') }}">
                 </div>
 
                 <div class="field-row">
@@ -473,22 +477,26 @@
 
                 <div class="field-row">
                     <label class="field-label">City</label>
-                    <input type="text" name="city" class="form-control" placeholder="City">
+                    <input type="text" name="city" class="form-control" placeholder="Start typing city"
+                        value="{{ request('city') }}">
                 </div>
 
                 <div class="field-row">
                     <label class="field-label">Address</label>
-                    <input type="text" name="address" class="form-control" placeholder="Number and/or street name">
+                    <input type="text" name="address" class="form-control" placeholder="Start typing address"
+                        value="{{ request('address') }}">
                 </div>
 
                 <div class="field-row">
                     <label class="field-label">ZIP Code</label>
-                    <input type="text" name="zip_code" class="form-control" placeholder="Enter a ZIP Code">
+                    <input type="text" name="zip_code" class="form-control" placeholder="ZIP code"
+                        value="{{ request('zip_code') }}">
                 </div>
 
                 <div class="field-row">
                     <label class="field-label">Phone Number</label>
-                    <input type="text" name="phone_number" class="form-control" placeholder="Enter a Phone Number">
+                    <input type="text" name="phone_number" class="form-control" placeholder="Phone number"
+                        value="{{ request('phone_number') }}">
                 </div>
 
                 <div class="search-actions">

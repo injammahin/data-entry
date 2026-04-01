@@ -4,39 +4,26 @@ namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
 use App\Models\Record;
+use App\Models\RecordSearchIndex;
 use App\Models\SearchList;
 use App\Models\State;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Maatwebsite\Excel\Facades\Excel;
-use Maatwebsite\Excel\Excel as ExcelWriter;
 use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Excel as ExcelWriter;
+use Maatwebsite\Excel\Facades\Excel;
 
 class BusinessController extends Controller
 {
     private const STATES_CACHE_TTL = 86400;
     private const SEARCH_CACHE_TTL = 600;
-    private const PAGE_CACHE_TTL = 300;
     private const SNAPSHOT_MAX_RECORDS = 10000;
-
-    private array $filterFields = [
-        'business_name',
-        'executive_first_name',
-        'executive_last_name',
-        'state_id',
-        'city',
-        'address',
-        'zip_code',
-        'phone_number',
-        'columns',
-        'per_page',
-    ];
+    private const CACHE_VERSION = 'v4';
 
     public function index()
     {
@@ -57,7 +44,7 @@ class BusinessController extends Controller
             return $redirect;
         }
 
-        $context = $this->buildPageContext($request, 30);
+        $context = $this->buildPageContext($request, 30, false);
 
         return view('user.us-business.results-list', $context + [
             'activeTab' => 'list',
@@ -73,40 +60,30 @@ class BusinessController extends Controller
         }
 
         $criteriaKey = $this->criteriaCacheKey($request);
+        $indexQuery = $this->buildFilteredIndexQuery($request);
 
         $insights = Cache::remember(
-            "user_business_insights:{$criteriaKey}",
+            "user_business_insights:{$criteriaKey}:" . self::CACHE_VERSION,
             self::SEARCH_CACHE_TTL,
-            function () use ($request) {
-                $baseQuery = $this->buildFilteredQuery($request);
-
+            function () use ($indexQuery) {
                 return [
-                    'total_results' => (clone $baseQuery)->reorder()->count('records.id'),
-                    'state_count' => (clone $baseQuery)->reorder()->distinct('records.state_id')->count('records.state_id'),
-                    'email_count' => $this->countEmailAvailable(clone $baseQuery),
-                    'real_email_count' => $this->countRealEmail(clone $baseQuery),
-                    'hashed_email_count' => $this->countHashedEmail(clone $baseQuery),
-                    'direct_mail_count' => $this->countDirectMail(clone $baseQuery),
-                    'top_cities' => $this->topJsonValues(
-                        clone $baseQuery,
-                        ['city', 'City', 'CITY'],
-                        8
-                    ),
-                    'top_sic_descriptions' => $this->topJsonValues(
-                        clone $baseQuery,
-                        ['sic_description', 'SIC Description', 'SIC DESCRIPTION'],
-                        8
-                    ),
-                    'top_titles' => $this->topJsonValues(
-                        clone $baseQuery,
-                        ['executive_title', 'Executive Title', 'EXECUTIVE TITLE'],
-                        8
-                    ),
+                    'total_results' => (clone $indexQuery)->reorder()->count('record_search_indexes.record_id'),
+                    'state_count' => (clone $indexQuery)->reorder()
+                        ->whereNotNull('record_search_indexes.state_id')
+                        ->distinct('record_search_indexes.state_id')
+                        ->count('record_search_indexes.state_id'),
+                    'email_count' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_email', true)->count(),
+                    'real_email_count' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_real_email', true)->count(),
+                    'hashed_email_count' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_hashed_email', true)->count(),
+                    'direct_mail_count' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_direct_mail', true)->count(),
+                    'top_cities' => $this->topIndexedValues(clone $indexQuery, 'record_search_indexes.city_norm', 8),
+                    'top_sic_descriptions' => $this->topIndexedValues(clone $indexQuery, 'record_search_indexes.sic_description_norm', 8),
+                    'top_titles' => $this->topIndexedValues(clone $indexQuery, 'record_search_indexes.executive_title_norm', 8),
                 ];
             }
         );
 
-        $context = $this->buildPageContext($request, 30, [
+        $context = $this->buildPageContext($request, 30, true, [
             'emailCount' => $insights['email_count'] ?? 0,
             'directMailCount' => $insights['direct_mail_count'] ?? 0,
         ]);
@@ -125,7 +102,7 @@ class BusinessController extends Controller
             return $redirect;
         }
 
-        $context = $this->buildPageContext($request, 12);
+        $context = $this->buildPageContext($request, 12, false);
 
         return view('user.us-business.results-details', $context + [
             'activeTab' => 'details',
@@ -140,7 +117,7 @@ class BusinessController extends Controller
             return $redirect;
         }
 
-        $context = $this->buildPageContext($request, 12);
+        $context = $this->buildPageContext($request, 12, false);
 
         return view('user.us-business.results-map', $context + [
             'activeTab' => 'map',
@@ -160,19 +137,22 @@ class BusinessController extends Controller
         }
 
         $criteriaKey = $this->criteriaCacheKey($request);
-        $baseQuery = $this->buildFilteredQuery($request);
+        $indexQuery = $this->buildFilteredIndexQuery($request);
 
-        $totalRecords = Cache::remember(
-            "user_business_total:{$criteriaKey}",
-            self::SEARCH_CACHE_TTL,
-            fn () => (clone $baseQuery)->count('records.id')
-        );
+        $totalRecords = $this->resolveTotalRecords($criteriaKey, $indexQuery);
 
         if ($totalRecords === 0) {
             return back()->with('error', 'No records found to save.');
         }
 
-        $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery);
+        $sampleIds = (clone $indexQuery)
+            ->reorder()
+            ->limit(5)
+            ->pluck('record_search_indexes.record_id')
+            ->all();
+
+        $sampleRecords = $this->fetchRecordsByIds($sampleIds);
+        $headers = $this->getOrderedHeaders($sampleRecords);
         $visibleColumns = $this->resolveVisibleColumns($request, $headers);
 
         $searchList = SearchList::create([
@@ -193,15 +173,15 @@ class BusinessController extends Controller
         ]);
 
         if ($totalRecords <= self::SNAPSHOT_MAX_RECORDS) {
-            (clone $baseQuery)
-                ->select('records.id')
+            (clone $indexQuery)
+                ->reorder()
                 ->chunkById(1000, function ($rows) use ($searchList) {
                     $payload = [];
 
                     foreach ($rows as $row) {
                         $payload[] = [
                             'search_list_id' => $searchList->id,
-                            'record_id' => $row->id,
+                            'record_id' => $row->record_id,
                             'created_at' => now(),
                             'updated_at' => now(),
                         ];
@@ -210,157 +190,28 @@ class BusinessController extends Controller
                     if (! empty($payload)) {
                         DB::table('search_list_record')->insertOrIgnore($payload);
                     }
-                }, 'records.id');
+                }, 'record_id');
         }
 
         return back()->with(
             'success',
             $totalRecords <= self::SNAPSHOT_MAX_RECORDS
                 ? 'Search list saved successfully.'
-                : 'Search list saved successfully. Large result set stored in fast smart mode.'
+                : 'Search list saved successfully. Large result set stored in smart mode.'
         );
     }
 
     public function exportCsv(Request $request)
     {
-        $this->validateSearchRequest($request);
-
-        if ($redirect = $this->ensureHasFilters($request)) {
-            return $redirect;
-        }
-
-        $baseQuery = $this->buildFilteredQuery($request);
-        $criteriaKey = $this->criteriaCacheKey($request);
-        $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery);
-        $visibleColumns = $this->resolveVisibleColumns($request, $headers);
-        $headings = array_map(fn ($column) => $this->headerLabel($column), $visibleColumns);
-
-        $export = new class(clone $baseQuery, $visibleColumns, $headings) implements FromQuery, WithHeadings, WithMapping {
-            public function __construct(
-                private Builder $query,
-                private array $visibleColumns,
-                private array $headings
-            ) {
-            }
-
-            public function query()
-            {
-                return $this->query;
-            }
-
-            public function headings(): array
-            {
-                return $this->headings;
-            }
-
-            public function map($record): array
-            {
-                $data = is_array($record->data_json)
-                    ? $record->data_json
-                    : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
-
-                $row = [];
-
-                foreach ($this->visibleColumns as $column) {
-                    $value = $this->resolveColumnValue($data, $column);
-                    $row[] = is_array($value)
-                        ? json_encode($value)
-                        : preg_replace("/\r\n|\r|\n/", ' ', (string) $value);
-                }
-
-                return $row;
-            }
-
-            private function resolveColumnValue(array $data, string $column): mixed
-            {
-                $normalized = strtolower(trim(str_replace(['-', ' '], '_', $column)));
-
-                if ($normalized === 'email') {
-                    return $this->extractActualEmail($data) ?? '';
-                }
-
-                if ($normalized === 'email_hash') {
-                    return $this->extractEmailHash($data) ?? '';
-                }
-
-                if ($normalized === 'email_status') {
-                    return $this->extractActualEmail($data)
-                        ? 'REAL EMAIL'
-                        : ($this->extractEmailHash($data) ? 'HASHED EMAIL ONLY' : '');
-                }
-
-                return $data[$column] ?? '';
-            }
-
-            private function extractActualEmail(array $data): ?string
-            {
-                $keys = [
-                    'email', 'Email', 'EMAIL',
-                    'email_address', 'Email Address', 'Email_Address',
-                ];
-
-                foreach ($keys as $key) {
-                    $value = $data[$key] ?? null;
-                    if (is_string($value) && str_contains($value, '@')) {
-                        return trim($value);
-                    }
-                }
-
-                if (!empty($data['contacts']) && is_array($data['contacts'])) {
-                    foreach ($data['contacts'] as $contact) {
-                        if (!is_array($contact)) {
-                            continue;
-                        }
-
-                        foreach (['email', 'Email', 'emailAddress', 'email_address'] as $key) {
-                            $value = $contact[$key] ?? null;
-                            if (is_string($value) && str_contains($value, '@')) {
-                                return trim($value);
-                            }
-                        }
-                    }
-                }
-
-                return null;
-            }
-
-            private function extractEmailHash(array $data): ?string
-            {
-                $keys = [
-                    'Email_Hash', 'email_hash', 'emailHash',
-                    'EMAIL_HASH',
-                ];
-
-                foreach ($keys as $key) {
-                    $value = $data[$key] ?? null;
-                    if (is_string($value) && trim($value) !== '') {
-                        return trim($value);
-                    }
-                }
-
-                if (!empty($data['contacts']) && is_array($data['contacts'])) {
-                    foreach ($data['contacts'] as $contact) {
-                        if (!is_array($contact)) {
-                            continue;
-                        }
-
-                        foreach (['emailHash', 'email_hash', 'Email_Hash'] as $key) {
-                            $value = $contact[$key] ?? null;
-                            if (is_string($value) && trim($value) !== '') {
-                                return trim($value);
-                            }
-                        }
-                    }
-                }
-
-                return null;
-            }
-        };
-
-        return Excel::download($export, 'business-search-results.csv', ExcelWriter::CSV);
+        return $this->exportFile($request, ExcelWriter::CSV, 'business-search-results.csv');
     }
 
     public function exportXlsx(Request $request)
+    {
+        return $this->exportFile($request, ExcelWriter::XLSX, 'business-search-results.xlsx');
+    }
+
+    private function exportFile(Request $request, string $writerType, string $filename)
     {
         $this->validateSearchRequest($request);
 
@@ -368,9 +219,8 @@ class BusinessController extends Controller
             return $redirect;
         }
 
-        $baseQuery = $this->buildFilteredQuery($request);
-        $criteriaKey = $this->criteriaCacheKey($request);
-        $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery);
+        $baseQuery = $this->buildFilteredRecordQuery($request);
+        $headers = $this->getOrderedHeaders();
         $visibleColumns = $this->resolveVisibleColumns($request, $headers);
         $headings = array_map(fn ($column) => $this->headerLabel($column), $visibleColumns);
 
@@ -398,10 +248,20 @@ class BusinessController extends Controller
                     ? $record->data_json
                     : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
 
+                $actualEmail = $this->extractActualEmail($data);
+                $emailHash = $this->extractEmailHash($data);
+
+                $data['Email'] = $actualEmail ?? '';
+                $data['Email_Hash'] = $emailHash ?? '';
+                $data['Email_Status'] = $actualEmail
+                    ? 'REAL EMAIL'
+                    : ($emailHash ? 'HASHED EMAIL ONLY' : '');
+
                 $row = [];
 
                 foreach ($this->visibleColumns as $column) {
-                    $value = $this->resolveColumnValue($data, $column);
+                    $value = $data[$column] ?? '';
+
                     $row[] = is_array($value)
                         ? json_encode($value)
                         : preg_replace("/\r\n|\r|\n/", ' ', (string) $value);
@@ -410,49 +270,25 @@ class BusinessController extends Controller
                 return $row;
             }
 
-            private function resolveColumnValue(array $data, string $column): mixed
-            {
-                $normalized = strtolower(trim(str_replace(['-', ' '], '_', $column)));
-
-                if ($normalized === 'email') {
-                    return $this->extractActualEmail($data) ?? '';
-                }
-
-                if ($normalized === 'email_hash') {
-                    return $this->extractEmailHash($data) ?? '';
-                }
-
-                if ($normalized === 'email_status') {
-                    return $this->extractActualEmail($data)
-                        ? 'REAL EMAIL'
-                        : ($this->extractEmailHash($data) ? 'HASHED EMAIL ONLY' : '');
-                }
-
-                return $data[$column] ?? '';
-            }
-
             private function extractActualEmail(array $data): ?string
             {
-                $keys = [
-                    'email', 'Email', 'EMAIL',
-                    'email_address', 'Email Address', 'Email_Address',
-                ];
-
-                foreach ($keys as $key) {
+                foreach (['email', 'Email', 'EMAIL', 'email_address', 'Email Address', 'Email_Address'] as $key) {
                     $value = $data[$key] ?? null;
+
                     if (is_string($value) && str_contains($value, '@')) {
                         return trim($value);
                     }
                 }
 
-                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                if (! empty($data['contacts']) && is_array($data['contacts'])) {
                     foreach ($data['contacts'] as $contact) {
-                        if (!is_array($contact)) {
+                        if (! is_array($contact)) {
                             continue;
                         }
 
                         foreach (['email', 'Email', 'emailAddress', 'email_address'] as $key) {
                             $value = $contact[$key] ?? null;
+
                             if (is_string($value) && str_contains($value, '@')) {
                                 return trim($value);
                             }
@@ -465,26 +301,23 @@ class BusinessController extends Controller
 
             private function extractEmailHash(array $data): ?string
             {
-                $keys = [
-                    'Email_Hash', 'email_hash', 'emailHash',
-                    'EMAIL_HASH',
-                ];
-
-                foreach ($keys as $key) {
+                foreach (['Email_Hash', 'email_hash', 'emailHash', 'EMAIL_HASH'] as $key) {
                     $value = $data[$key] ?? null;
+
                     if (is_string($value) && trim($value) !== '') {
                         return trim($value);
                     }
                 }
 
-                if (!empty($data['contacts']) && is_array($data['contacts'])) {
+                if (! empty($data['contacts']) && is_array($data['contacts'])) {
                     foreach ($data['contacts'] as $contact) {
-                        if (!is_array($contact)) {
+                        if (! is_array($contact)) {
                             continue;
                         }
 
                         foreach (['emailHash', 'email_hash', 'Email_Hash'] as $key) {
                             $value = $contact[$key] ?? null;
+
                             if (is_string($value) && trim($value) !== '') {
                                 return trim($value);
                             }
@@ -496,18 +329,200 @@ class BusinessController extends Controller
             }
         };
 
-        return Excel::download($export, 'business-search-results.xlsx', ExcelWriter::XLSX);
+        return Excel::download($export, $filename, $writerType);
+    }
+
+    private function buildPageContext(
+        Request $request,
+        int $defaultPerPage,
+        bool $loadMetrics = false,
+        ?array $metricsOverride = null
+    ): array {
+        $perPage = (int) $request->get('per_page', $defaultPerPage);
+        $allowed = [12, 30, 50, 100];
+
+        if (! in_array($perPage, $allowed, true)) {
+            $perPage = $defaultPerPage;
+        }
+
+        $page = max(1, (int) $request->get('page', 1));
+        $criteriaKey = $this->criteriaCacheKey($request);
+        $indexQuery = $this->buildFilteredIndexQuery($request);
+
+        $totalRecords = $this->resolveTotalRecords($criteriaKey, $indexQuery);
+
+        $paginator = (clone $indexQuery)
+            ->simplePaginate($perPage, ['record_search_indexes.record_id'], 'page', $page)
+            ->withQueryString();
+
+        $pageIds = collect($paginator->items())->pluck('record_id')->all();
+        $pageRecords = $this->fetchRecordsByIds($pageIds);
+        $paginator->setCollection($pageRecords);
+
+        // stale total cache recovery
+        if ($totalRecords === 0 && $pageRecords->isNotEmpty()) {
+            $totalRecords = (clone $indexQuery)->reorder()->count('record_search_indexes.record_id');
+
+            Cache::put(
+                "user_business_total:{$criteriaKey}:" . self::CACHE_VERSION,
+                $totalRecords,
+                self::SEARCH_CACHE_TTL
+            );
+        }
+
+        $headers = $this->getOrderedHeaders($pageRecords);
+        $visibleColumns = $this->resolveVisibleColumns($request, $headers);
+
+        $selectedState = null;
+        if ($request->filled('state_id')) {
+            $selectedState = Cache::remember(
+                'user_business_state_' . $request->state_id,
+                self::STATES_CACHE_TTL,
+                fn () => State::select('id', 'name')->find($request->state_id)
+            );
+        }
+
+        if ($metricsOverride !== null) {
+            $metrics = [
+                'emailCount' => (int) ($metricsOverride['emailCount'] ?? 0),
+                'directMailCount' => (int) ($metricsOverride['directMailCount'] ?? 0),
+            ];
+        } elseif ($loadMetrics) {
+            $metrics = Cache::remember(
+                "user_business_metrics:{$criteriaKey}:" . self::CACHE_VERSION,
+                self::SEARCH_CACHE_TTL,
+                fn () => [
+                    'emailCount' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_email', true)->count(),
+                    'directMailCount' => (clone $indexQuery)->reorder()->where('record_search_indexes.has_direct_mail', true)->count(),
+                ]
+            );
+        } else {
+            $metrics = [
+                'emailCount' => 0,
+                'directMailCount' => 0,
+            ];
+        }
+
+        return [
+            'records' => $paginator,
+            'totalRecords' => $totalRecords,
+            'headers' => $headers,
+            'visibleColumns' => $visibleColumns,
+            'availableColumns' => $headers,
+            'columnAliases' => $this->columnAliases(),
+            'activeFilters' => $this->activeFilters($request, $selectedState),
+            'selectedState' => $selectedState,
+            'emailCount' => $metrics['emailCount'] ?? 0,
+            'directMailCount' => $metrics['directMailCount'] ?? 0,
+            'perPage' => $perPage,
+        ];
+    }
+
+    private function resolveTotalRecords(string $criteriaKey, Builder $indexQuery): int
+    {
+        return (int) Cache::remember(
+            "user_business_total:{$criteriaKey}:" . self::CACHE_VERSION,
+            self::SEARCH_CACHE_TTL,
+            fn () => (clone $indexQuery)->reorder()->count('record_search_indexes.record_id')
+        );
+    }
+
+    private function buildFilteredIndexQuery(Request $request): Builder
+    {
+        $query = RecordSearchIndex::query()
+            ->select(['record_search_indexes.record_id'])
+            ->orderBy('record_search_indexes.record_id');
+
+        if ($request->filled('state_id')) {
+            $query->where('record_search_indexes.state_id', (int) $request->state_id);
+        }
+
+        $this->applyPrefixTextFilter($query, 'record_search_indexes.business_name_norm', $request->business_name);
+        $this->applyPrefixTextFilter($query, 'record_search_indexes.executive_first_name_norm', $request->executive_first_name);
+        $this->applyPrefixTextFilter($query, 'record_search_indexes.executive_last_name_norm', $request->executive_last_name);
+        $this->applyPrefixTextFilter($query, 'record_search_indexes.city_norm', $request->city);
+        $this->applyPrefixTextFilter($query, 'record_search_indexes.address_norm', $request->address);
+        $this->applyZipFilter($query, 'record_search_indexes.zip_code_norm', $request->zip_code);
+        $this->applyPhoneFilter($query, 'record_search_indexes.phone_norm', $request->phone_number);
+
+        return $query;
+    }
+
+    private function buildFilteredRecordQuery(Request $request): Builder
+    {
+        $subQuery = (clone $this->buildFilteredIndexQuery($request))
+            ->reorder()
+            ->select('record_search_indexes.record_id');
+
+        return Record::query()
+            ->joinSub($subQuery, 'idx', function ($join) {
+                $join->on('idx.record_id', '=', 'records.id');
+            })
+            ->select([
+                'records.id',
+                'records.state_id',
+                'records.import_id',
+                'records.row_number',
+                'records.data_json',
+            ])
+            ->orderBy('records.id');
+    }
+
+    private function applyPrefixTextFilter(Builder $query, string $column, ?string $value): void
+    {
+        $value = $this->normalizeText($value);
+
+        if ($value === null) {
+            return;
+        }
+
+        $query->where($column, 'like', $value . '%');
+    }
+
+    private function applyPhoneFilter(Builder $query, string $column, ?string $value): void
+    {
+        $value = $this->normalizePhone($value);
+
+        if ($value === null) {
+            return;
+        }
+
+        $query->where($column, 'like', $value . '%');
+    }
+
+    private function applyZipFilter(Builder $query, string $column, ?string $value): void
+    {
+        $value = $this->normalizeZip($value);
+
+        if ($value === null) {
+            return;
+        }
+
+        $query->where($column, 'like', $value . '%');
+    }
+
+    private function topIndexedValues(Builder $query, string $column, int $limit = 8): Collection
+    {
+        return (clone $query)
+            ->reorder()
+            ->whereNotNull($column)
+            ->where($column, '!=', '')
+            ->selectRaw("{$column} as label, COUNT(*) as total")
+            ->groupBy($column)
+            ->orderByDesc('total')
+            ->limit($limit)
+            ->get();
     }
 
     private function validateSearchRequest(Request $request): void
     {
         $request->validate([
-            'business_name' => ['nullable', 'string', 'max:255'],
-            'executive_first_name' => ['nullable', 'string', 'max:255'],
-            'executive_last_name' => ['nullable', 'string', 'max:255'],
+            'business_name' => ['nullable', 'string', 'min:2', 'max:255'],
+            'executive_first_name' => ['nullable', 'string', 'min:2', 'max:255'],
+            'executive_last_name' => ['nullable', 'string', 'min:2', 'max:255'],
             'state_id' => ['nullable', 'integer', 'exists:states,id'],
-            'city' => ['nullable', 'string', 'max:255'],
-            'address' => ['nullable', 'string', 'max:255'],
+            'city' => ['nullable', 'string', 'min:2', 'max:255'],
+            'address' => ['nullable', 'string', 'min:2', 'max:255'],
             'zip_code' => ['nullable', 'string', 'max:50'],
             'phone_number' => ['nullable', 'string', 'max:50'],
             'columns' => ['nullable', 'array'],
@@ -538,223 +553,13 @@ class BusinessController extends Controller
         return null;
     }
 
-private function buildPageContext(Request $request, int $defaultPerPage, ?array $metricsOverride = null): array
-{
-    $criteriaKey = $this->criteriaCacheKey($request);
-    $baseQuery = $this->buildFilteredQuery($request);
-
-    $perPage = (int) $request->get('per_page', $defaultPerPage);
-    $allowed = [12, 30, 50, 100];
-
-    if (! in_array($perPage, $allowed, true)) {
-        $perPage = $defaultPerPage;
-    }
-
-    $page = max(1, (int) $request->get('page', 1));
-
-    $total = Cache::remember(
-        "user_business_total:{$criteriaKey}",
-        self::SEARCH_CACHE_TTL,
-        fn () => (clone $baseQuery)->reorder()->count('records.id')
-    );
-
-    $pageIds = [];
-
-    if ($total > 0) {
-        $pageIds = Cache::remember(
-            "user_business_page_ids:{$criteriaKey}:{$page}:{$perPage}",
-            self::PAGE_CACHE_TTL,
-            fn () => (clone $baseQuery)
-                ->forPage($page, $perPage)
-                ->pluck('records.id')
-                ->all()
-        );
-    }
-
-    $pageRecords = $this->fetchRecordsByIds($pageIds);
-
-    $records = new LengthAwarePaginator(
-        $pageRecords,
-        $total,
-        $perPage,
-        $page,
-        [
-            'path' => url()->current(),
-            'query' => $request->query(),
-        ]
-    );
-
-    $headers = $this->getOrderedHeaders($request, $criteriaKey, clone $baseQuery, $pageRecords);
-    $visibleColumns = $this->resolveVisibleColumns($request, $headers);
-
-    $selectedState = null;
-    if ($request->filled('state_id')) {
-        $selectedState = Cache::remember(
-            'user_business_state_' . $request->state_id,
-            self::STATES_CACHE_TTL,
-            fn () => State::select('id', 'name')->find($request->state_id)
-        );
-    }
-
-    $metricsCacheKey = "user_business_metrics:{$criteriaKey}:v2";
-
-    if ($metricsOverride !== null) {
-        $metrics = [
-            'emailCount' => (int) ($metricsOverride['emailCount'] ?? 0),
-            'directMailCount' => (int) ($metricsOverride['directMailCount'] ?? 0),
-        ];
-
-        Cache::put($metricsCacheKey, $metrics, self::SEARCH_CACHE_TTL);
-    } else {
-        $metrics = Cache::remember(
-            $metricsCacheKey,
-            self::SEARCH_CACHE_TTL,
-            function () use ($baseQuery) {
-                return [
-                    'emailCount' => $this->countEmailAvailable(clone $baseQuery),
-                    'directMailCount' => $this->countDirectMail(clone $baseQuery),
-                ];
-            }
-        );
-    }
-
-    return [
-        'records' => $records,
-        'headers' => $headers,
-        'visibleColumns' => $visibleColumns,
-        'availableColumns' => $headers,
-        'columnAliases' => $this->columnAliases(),
-        'activeFilters' => $this->activeFilters($request, $selectedState),
-        'selectedState' => $selectedState,
-        'emailCount' => $metrics['emailCount'] ?? 0,
-        'directMailCount' => $metrics['directMailCount'] ?? 0,
-        'perPage' => $perPage,
-    ];
-}
-
-    private function buildFilteredQuery(Request $request): Builder
-    {
-        $query = Record::query()
-            ->select([
-                'records.id',
-                'records.state_id',
-                'records.import_id',
-                'records.row_number',
-                'records.data_json',
-            ])
-            ->orderBy('records.id');
-
-        if ($request->filled('state_id')) {
-            $query->where('records.state_id', $request->state_id);
-        }
-
-        $this->applySearchOnJsonField($query, $request->business_name, [
-            'business_name',
-            'Business Name',
-            'BUSINESS NAME',
-            'company_name',
-            'Company Name',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->executive_first_name, [
-            'executive_first_name',
-            'Executive First Name',
-            'first_name',
-            'First Name',
-            'owner_first_name',
-            'Owner First Name',
-            'executive_info',
-            'Executive Info',
-            'EXECUTIVE INFO',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->executive_last_name, [
-            'executive_last_name',
-            'Executive Last Name',
-            'last_name',
-            'Last Name',
-            'owner_last_name',
-            'Owner Last Name',
-            'executive_info',
-            'Executive Info',
-            'EXECUTIVE INFO',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->city, [
-            'city',
-            'City',
-            'CITY',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->address, [
-            'address',
-            'Address',
-            'ADDRESS',
-            'street_address',
-            'Street Address',
-            'mailing_address',
-            'Mailing Address',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->zip_code, [
-            'zip',
-            'Zip',
-            'ZIP',
-            'zip_code',
-            'Zip Code',
-            'ZIP CODE',
-            'postal_code',
-            'Postal Code',
-        ]);
-
-        $this->applySearchOnJsonField($query, $request->phone_number, [
-            'phone',
-            'Phone',
-            'PHONE',
-            'phone_number',
-            'Phone Number',
-            'PHONE NUMBER',
-            'telephone',
-            'Telephone',
-        ]);
-
-        return $query;
-    }
-
-    private function applySearchOnJsonField(Builder $query, ?string $value, array $possibleKeys): void
-    {
-        $value = trim((string) $value);
-
-        if ($value === '') {
-            return;
-        }
-
-        $driver = DB::connection()->getDriverName();
-        $lowerValue = mb_strtolower($value);
-
-        $query->where(function (Builder $innerQuery) use ($driver, $possibleKeys, $lowerValue, $value) {
-            if ($driver === 'mysql') {
-                $expr = $this->jsonCoalesceExpression($possibleKeys);
-
-                $innerQuery->whereRaw(
-                    "LOWER(COALESCE({$expr}, '')) LIKE ?",
-                    ['%' . $lowerValue . '%']
-                );
-
-                return;
-            }
-
-            $innerQuery->where('records.data_json', 'like', '%' . $value . '%');
-        });
-    }
-
     private function fetchRecordsByIds(array $ids): Collection
     {
         if (empty($ids)) {
             return collect();
         }
 
-        $items = Record::query()
+        $records = Record::query()
             ->select([
                 'records.id',
                 'records.state_id',
@@ -765,13 +570,11 @@ private function buildPageContext(Request $request, int $defaultPerPage, ?array 
             ->with(['state:id,name'])
             ->whereIn('records.id', $ids)
             ->get()
-            ->map(function ($record) {
-                return $this->enrichRecordData($record);
-            })
+            ->map(fn ($record) => $this->enrichRecordData($record))
             ->keyBy('id');
 
         return collect($ids)
-            ->map(fn ($id) => $items->get($id))
+            ->map(fn ($id) => $records->get($id))
             ->filter()
             ->values();
     }
@@ -796,67 +599,41 @@ private function buildPageContext(Request $request, int $defaultPerPage, ?array 
         return $record;
     }
 
-    private function getOrderedHeaders(
-        Request $request,
-        string $criteriaKey,
-        Builder $baseQuery,
-        ?Collection $pageRecords = null
-    ): array {
-        return Cache::remember(
-            "user_business_headers:{$criteriaKey}",
-            self::SEARCH_CACHE_TTL,
-            function () use ($baseQuery, $pageRecords) {
-                $headers = [];
-
-                if ($pageRecords instanceof Collection && $pageRecords->isNotEmpty()) {
-                    $firstRecord = $pageRecords->first();
-
-                    if (is_array($firstRecord->data_json)) {
-                        $headers = array_keys($firstRecord->data_json);
-                    }
-                }
-
-                if (empty($headers)) {
-                    $record = (clone $baseQuery)->first();
-
-                    if ($record) {
-                        $data = is_array($record->data_json)
-                            ? $record->data_json
-                            : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
-
-                        $data['Email'] = '';
-                        $data['Email_Hash'] = '';
-                        $data['Email_Status'] = '';
-
-                        $headers = array_keys($data);
-                    }
-                }
-
-                return $this->augmentAndOrderHeaders($headers);
-            }
-        );
-    }
-
-private function resolveVisibleColumns(Request $request, array $headers): array
-{
-    $requested = $request->input('columns', []);
-
-    if (! is_array($requested) || empty($requested)) {
-        return array_values(array_filter($headers, function ($header) {
-            $normalized = strtolower(trim(str_replace(['-', ' '], '_', $header)));
-
-            return $normalized !== 'email_hash';
-        }));
-    }
-
-    return array_values(array_filter(
-        $headers,
-        fn ($header) => in_array($header, $requested, true)
-    ));
-}
-
-    private function augmentAndOrderHeaders(array $headers): array
+    private function getOrderedHeaders(?Collection $pageRecords = null): array
     {
+        $headers = [];
+
+        if ($pageRecords instanceof Collection && $pageRecords->isNotEmpty()) {
+            $firstRecord = $pageRecords->first();
+
+            if (is_array($firstRecord->data_json)) {
+                $headers = array_keys($firstRecord->data_json);
+            }
+        }
+
+        if (empty($headers)) {
+            $headers = Cache::remember(
+                'user_business_default_headers:' . self::CACHE_VERSION,
+                3600,
+                function () {
+                    $record = Record::query()
+                        ->select('data_json')
+                        ->whereNotNull('data_json')
+                        ->first();
+
+                    if (! $record) {
+                        return [];
+                    }
+
+                    $data = is_array($record->data_json)
+                        ? $record->data_json
+                        : (json_decode($record->getRawOriginal('data_json') ?: '[]', true) ?: []);
+
+                    return array_keys($data);
+                }
+            );
+        }
+
         foreach (['Email', 'Email_Hash', 'Email_Status'] as $virtualHeader) {
             if (! in_array($virtualHeader, $headers, true)) {
                 $headers[] = $virtualHeader;
@@ -866,6 +643,23 @@ private function resolveVisibleColumns(Request $request, array $headers): array
         return $this->orderHeaders($headers);
     }
 
+    private function resolveVisibleColumns(Request $request, array $headers): array
+    {
+        $requested = $request->input('columns', []);
+
+        if (! is_array($requested) || empty($requested)) {
+            return array_values(array_filter($headers, function ($header) {
+                $normalized = strtolower(trim(str_replace(['-', ' '], '_', $header)));
+                return $normalized !== 'email_hash';
+            }));
+        }
+
+        return array_values(array_filter(
+            $headers,
+            fn ($header) => in_array($header, $requested, true)
+        ));
+    }
+
     private function orderHeaders(array $headers): array
     {
         $orderedPriority = [
@@ -873,13 +667,26 @@ private function resolveVisibleColumns(Request $request, array $headers): array
             'executive_info',
             'executive_title',
             'executive_gender',
+            'executive_first_name',
+            'executive_last_name',
             'phone',
             'address',
             'city',
             'state',
             'zip',
+            'county',
+            'website',
+            'primary_sic',
+            'primary_sic_description',
             'sic_code',
             'sic_description',
+            'employees',
+            'sales_volume',
+            'location_type',
+            'infogroup_id',
+            'msa',
+            'latitude',
+            'longitude',
             'email',
             'email_hash',
             'email_status',
@@ -925,179 +732,12 @@ private function resolveVisibleColumns(Request $request, array $headers): array
         ];
     }
 
-    private function countEmailAvailable(Builder $query): int
-    {
-        $driver = DB::connection()->getDriverName();
-        $countQuery = clone $query;
-        $countQuery->reorder();
-
-        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
-            if ($driver === 'mysql') {
-                $actualExpr = $this->jsonCoalesceExpression($this->actualEmailKeys());
-                $hashExpr = $this->jsonCoalesceExpression($this->emailHashKeys());
-
-                $innerQuery->whereRaw("
-                    (
-                        COALESCE({$actualExpr}, '') LIKE '%@%'
-                        OR NULLIF(TRIM(COALESCE({$hashExpr}, '')), '') IS NOT NULL
-                        OR records.data_json REGEXP '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}'
-                        OR records.data_json REGEXP '\"emailHash\"[[:space:]]*:[[:space:]]*\"[^\"]+\"'
-                    )
-                ");
-
-                return;
-            }
-
-            $innerQuery->where('records.data_json', 'like', '%@%')
-                ->orWhere('records.data_json', 'like', '%emailHash%');
-        })->count('records.id');
-    }
-
-    private function countRealEmail(Builder $query): int
-    {
-        $driver = DB::connection()->getDriverName();
-        $countQuery = clone $query;
-        $countQuery->reorder();
-
-        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
-            if ($driver === 'mysql') {
-                $actualExpr = $this->jsonCoalesceExpression($this->actualEmailKeys());
-
-                $innerQuery->whereRaw("
-                    (
-                        COALESCE({$actualExpr}, '') LIKE '%@%'
-                        OR records.data_json REGEXP '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\\\.[A-Za-z]{2,}'
-                    )
-                ");
-
-                return;
-            }
-
-            $innerQuery->where('records.data_json', 'like', '%@%');
-        })->count('records.id');
-    }
-
-    private function countHashedEmail(Builder $query): int
-    {
-        $driver = DB::connection()->getDriverName();
-        $countQuery = clone $query;
-        $countQuery->reorder();
-
-        return $countQuery->where(function (Builder $innerQuery) use ($driver) {
-            if ($driver === 'mysql') {
-                $hashExpr = $this->jsonCoalesceExpression($this->emailHashKeys());
-
-                $innerQuery->whereRaw("
-                    (
-                        NULLIF(TRIM(COALESCE({$hashExpr}, '')), '') IS NOT NULL
-                        OR records.data_json REGEXP '\"emailHash\"[[:space:]]*:[[:space:]]*\"[^\"]+\"'
-                    )
-                ");
-
-                return;
-            }
-
-            $innerQuery->where('records.data_json', 'like', '%emailHash%')
-                ->orWhere('records.data_json', 'like', '%Email_Hash%');
-        })->count('records.id');
-    }
-
-    private function countDirectMail(Builder $query): int
-    {
-        return $this->countFilledJsonField(
-            $query,
-            ['address', 'Address', 'ADDRESS', 'street_address', 'Street Address', 'mailing_address', 'Mailing Address']
-        );
-    }
-
-    private function countFilledJsonField(Builder $query, array $possibleKeys, bool $mustContainAt = false): int
-    {
-        $driver = DB::connection()->getDriverName();
-
-        $countQuery = clone $query;
-        $countQuery->reorder();
-
-        return $countQuery->where(function (Builder $innerQuery) use ($driver, $possibleKeys, $mustContainAt) {
-            if ($driver === 'mysql') {
-                $expr = $this->jsonCoalesceExpression($possibleKeys);
-
-                if ($mustContainAt) {
-                    $innerQuery->whereRaw("COALESCE({$expr}, '') LIKE '%@%'");
-                } else {
-                    $innerQuery->whereRaw("NULLIF(TRIM(COALESCE({$expr}, '')), '') IS NOT NULL");
-                }
-
-                return;
-            }
-
-            if ($mustContainAt) {
-                $innerQuery->where('records.data_json', 'like', '%@%');
-            } else {
-                $innerQuery->where('records.data_json', 'like', '%Address%');
-            }
-        })->count('records.id');
-    }
-
-    private function topJsonValues(Builder $query, array $possibleKeys, int $limit = 8): Collection
-    {
-        $driver = DB::connection()->getDriverName();
-
-        if ($driver !== 'mysql') {
-            return collect();
-        }
-
-        $expr = $this->jsonCoalesceExpression($possibleKeys);
-        $labelExpr = "COALESCE({$expr}, 'N/A')";
-
-        $aggregateQuery = clone $query;
-        $aggregateQuery->reorder();
-        $aggregateQuery->getQuery()->columns = null;
-
-        return $aggregateQuery
-            ->selectRaw("{$labelExpr} as label, COUNT(*) as total")
-            ->groupByRaw($labelExpr)
-            ->orderByDesc('total')
-            ->limit($limit)
-            ->get();
-    }
-
-    private function jsonCoalesceExpression(array $possibleKeys): string
-    {
-        $pieces = [];
-
-        foreach ($possibleKeys as $key) {
-            $jsonPath = '$."' . str_replace('"', '\"', $key) . '"';
-            $pieces[] = "NULLIF(JSON_UNQUOTE(JSON_EXTRACT(records.data_json, '{$jsonPath}')), '')";
-        }
-
-        return 'COALESCE(' . implode(', ', $pieces) . ')';
-    }
-
-    private function actualEmailKeys(): array
-    {
-        return [
-            'email',
-            'Email',
-            'EMAIL',
-            'email_address',
-            'Email Address',
-            'Email_Address',
-        ];
-    }
-
-    private function emailHashKeys(): array
-    {
-        return [
-            'Email_Hash',
-            'email_hash',
-            'emailHash',
-            'EMAIL_HASH',
-        ];
-    }
-
     private function extractActualEmail(array $data): ?string
     {
-        foreach ($this->actualEmailKeys() as $key) {
+        foreach ([
+            'email', 'Email', 'EMAIL',
+            'email_address', 'Email Address', 'Email_Address',
+        ] as $key) {
             $value = $data[$key] ?? null;
 
             if (is_string($value) && str_contains($value, '@')) {
@@ -1105,9 +745,9 @@ private function resolveVisibleColumns(Request $request, array $headers): array
             }
         }
 
-        if (!empty($data['contacts']) && is_array($data['contacts'])) {
+        if (! empty($data['contacts']) && is_array($data['contacts'])) {
             foreach ($data['contacts'] as $contact) {
-                if (!is_array($contact)) {
+                if (! is_array($contact)) {
                     continue;
                 }
 
@@ -1126,7 +766,7 @@ private function resolveVisibleColumns(Request $request, array $headers): array
 
     private function extractEmailHash(array $data): ?string
     {
-        foreach ($this->emailHashKeys() as $key) {
+        foreach (['Email_Hash', 'email_hash', 'emailHash', 'EMAIL_HASH'] as $key) {
             $value = $data[$key] ?? null;
 
             if (is_string($value) && trim($value) !== '') {
@@ -1134,9 +774,9 @@ private function resolveVisibleColumns(Request $request, array $headers): array
             }
         }
 
-        if (!empty($data['contacts']) && is_array($data['contacts'])) {
+        if (! empty($data['contacts']) && is_array($data['contacts'])) {
             foreach ($data['contacts'] as $contact) {
-                if (!is_array($contact)) {
+                if (! is_array($contact)) {
                     continue;
                 }
 
@@ -1157,7 +797,7 @@ private function resolveVisibleColumns(Request $request, array $headers): array
     {
         $normalized = strtolower(trim(str_replace(['-', ' '], '_', $header)));
 
-        return $this->columnAliases()[$normalized] ?? strtoupper($header);
+        return $this->columnAliases()[$normalized] ?? strtoupper(str_replace('_', ' ', $header));
     }
 
     private function columnAliases(): array
@@ -1167,6 +807,8 @@ private function resolveVisibleColumns(Request $request, array $headers): array
             'executive_info' => 'EXECUTIVE INFO',
             'executive_title' => 'EXECUTIVE TITLE',
             'executive_gender' => 'EXECUTIVE GENDER',
+            'executive_first_name' => 'EXECUTIVE FIRST NAME',
+            'executive_last_name' => 'EXECUTIVE LAST NAME',
             'phone' => 'PHONE',
             'phone_number' => 'PHONE',
             'address' => 'ADDRESS',
@@ -1174,8 +816,19 @@ private function resolveVisibleColumns(Request $request, array $headers): array
             'state' => 'STATE',
             'zip' => 'ZIP',
             'zip_code' => 'ZIP',
+            'county' => 'COUNTY',
+            'website' => 'WEBSITE',
+            'primary_sic' => 'PRIMARY SIC',
+            'primary_sic_description' => 'PRIMARY SIC DESCRIPTION',
             'sic_code' => 'SIC CODE',
             'sic_description' => 'SIC DESCRIPTION',
+            'employees' => 'EMPLOYEES',
+            'sales_volume' => 'SALES VOLUME',
+            'location_type' => 'LOCATION TYPE',
+            'infogroup_id' => 'INFOGROUP ID',
+            'msa' => 'MSA',
+            'latitude' => 'LATITUDE',
+            'longitude' => 'LONGITUDE',
             'email' => 'EMAIL',
             'email_hash' => 'EMAIL HASH',
             'email_status' => 'EMAIL STATUS',
@@ -1185,18 +838,55 @@ private function resolveVisibleColumns(Request $request, array $headers): array
     private function criteriaCacheKey(Request $request): string
     {
         $payload = [
-            'business_name' => trim((string) $request->business_name),
-            'executive_first_name' => trim((string) $request->executive_first_name),
-            'executive_last_name' => trim((string) $request->executive_last_name),
-            'state_id' => $request->state_id,
-            'city' => trim((string) $request->city),
-            'address' => trim((string) $request->address),
-            'zip_code' => trim((string) $request->zip_code),
-            'phone_number' => trim((string) $request->phone_number),
+            'business_name' => $this->normalizeText($request->business_name),
+            'executive_first_name' => $this->normalizeText($request->executive_first_name),
+            'executive_last_name' => $this->normalizeText($request->executive_last_name),
+            'state_id' => $request->state_id ? (int) $request->state_id : null,
+            'city' => $this->normalizeText($request->city),
+            'address' => $this->normalizeText($request->address),
+            'zip_code' => $this->normalizeZip($request->zip_code),
+            'phone_number' => $this->normalizePhone($request->phone_number),
         ];
 
         ksort($payload);
 
         return md5(json_encode($payload));
+    }
+
+    private function normalizeText(?string $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $value = mb_strtolower(trim($value));
+        $value = preg_replace('/[^\pL\pN]+/u', ' ', $value);
+        $value = preg_replace('/\s+/u', ' ', $value);
+        $value = trim($value);
+
+        return $value !== '' ? $value : null;
+    }
+
+    private function normalizePhone(?string $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $value);
+
+        return $digits !== '' ? $digits : null;
+    }
+
+    private function normalizeZip(?string $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $value = strtoupper(trim($value));
+        $value = preg_replace('/\s+/', '', $value);
+
+        return $value !== '' ? $value : null;
     }
 }

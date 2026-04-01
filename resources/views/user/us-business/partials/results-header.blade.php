@@ -48,95 +48,101 @@
         <div class="sg-alert error">{{ session('error') }}</div>
     @endif
 
-    <div class="sg-top-toolbar">
-        <div class="sg-top-toolbar-left">
-            <div class="sg-count-box">
-                <div class="num">{{ number_format($records->total()) }}</div>
-                <div class="label">Records</div>
-            </div>
+    <div class="sg-results-header">
+        <div class="sg-results-top">
+            <div class="sg-results-top-left">
+                <h1 class="sg-page-title">Search Results</h1>
 
-            <div class="sg-action-group">
-                <div class="sg-action-col">
-                    <div class="sg-action-title">List Options</div>
-                    <div class="sg-actions">
-                        <button type="button" class="sg-action" data-modal-open="saveListModal">
-                            <i class="fa-regular fa-floppy-disk"></i>
-                            <span>Save</span>
-                        </button>
+                @php
+                    $activeFilterCount = collect($activeFilters)->filter(fn($value) => filled($value))->count();
+                @endphp
 
-                        <div class="sg-dropdown">
-                            <button type="button" class="sg-action" data-export-toggle>
-                                <i class="fa-solid fa-file-export"></i>
-                                <span>Export</span>
-                            </button>
-
-                            <div class="sg-dropdown-menu">
-                                <a href="{{ route('user.us-business.export.csv', $queryData) }}">
-                                    <i class="fa-solid fa-file-csv"></i> Export CSV
-                                </a>
-                                <a href="{{ route('user.us-business.export.xlsx', $queryData) }}">
-                                    <i class="fa-solid fa-file-excel"></i> Export XLSX
-                                </a>
-                            </div>
-                        </div>
-
-                        <div class="sg-tooltip-wrap">
-                            <a href="javascript:void(0)" class="sg-action">
-                                <i class="fa-solid fa-envelope-open-text"></i>
-                                <span>Direct Mail</span>
-                            </a>
-                            <div class="sg-tooltip-bubble">
-                                {{ number_format($directMailCount) }} Direct Mail Contacts
-                            </div>
-                        </div>
-                    </div>
+                <div class="sg-filter-summary">
+                    @if($activeFilterCount > 0)
+                        <span>{{ $activeFilterCount }} filter{{ $activeFilterCount > 1 ? 's' : '' }} applied</span>
+                    @else
+                        <span>No active filters</span>
+                    @endif
                 </div>
             </div>
 
-            <div class="sg-action-group">
-                <div class="sg-action-col">
-                    <div class="sg-action-title">Campaigns</div>
-                    <div class="sg-actions">
-                        <div class="sg-tooltip-wrap">
-                            <a href="javascript:void(0)" class="sg-action">
-                                <i class="fa-solid fa-at"></i>
-                                <span>Email</span>
-                            </a>
-                            <div class="sg-tooltip-bubble">
-                                {{ number_format($emailCount) }} Emails
-                            </div>
-                        </div>
-
-                        {{-- <a href="javascript:void(0)" class="sg-action">
-                            <i class="fa-solid fa-display"></i>
-                            <span>Display Ads</span>
-                        </a>
-
-                        <a href="javascript:void(0)" class="sg-action">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i>
-                            <span>Intent Data</span>
-                            <span class="new-badge">New</span>
-                        </a> --}}
-
-                        {{-- <button type="button" class="sg-action" data-modal-open="columnsModal">
-                            <i class="fa-solid fa-ellipsis"></i>
-                            <span>More</span>
-                        </button> --}}
-                    </div>
-                </div>
+            <div class="sg-results-top-right">
+                <a href="{{ route('user.us-business.index') }}" class="sg-clear-link">CLEAR ALL</a>
             </div>
         </div>
 
-        <div class="sg-top-toolbar-right">
-            <div class="sg-tab-switch">
-                <a href="{{ $insightRoute }}" class="{{ $activeTab === 'insights' ? 'active' : '' }}">INSIGHTS</a>
-                <a href="{{ $listRoute }}" class="{{ $activeTab === 'list' ? 'active' : '' }}">LIST</a>
-                <a href="{{ $detailsRoute }}" class="{{ $activeTab === 'details' ? 'active' : '' }}">DETAILS</a>
-                <a href="{{ $mapRoute }}" class="{{ $activeTab === 'map' ? 'active' : '' }}">MAP</a>
+        @if(session('success'))
+            <div class="sg-alert success">{{ session('success') }}</div>
+        @endif
+
+        @if(session('error'))
+            <div class="sg-alert error">{{ session('error') }}</div>
+        @endif
+
+        <div class="sg-top-toolbar">
+            <div class="sg-top-toolbar-left">
+                <div class="sg-count-box">
+                    <div class="num">{{ number_format($totalRecords ?? 0) }}</div>
+                    <div class="label">Records</div>
+                </div>
+
+                <div class="sg-action-group">
+                    <div class="sg-action-col">
+                        <div class="sg-action-title">List Options</div>
+
+                        <div class="sg-actions">
+                            <button type="button" class="sg-action" data-modal-open="saveListModal">
+                                <i class="fa-regular fa-floppy-disk"></i>
+                                <span>Save</span>
+                            </button>
+
+                            <div class="sg-dropdown">
+                                <button type="button" class="sg-action" data-export-toggle>
+                                    <i class="fa-solid fa-file-export"></i>
+                                    <span>Export</span>
+                                </button>
+
+                                <div class="sg-dropdown-menu" data-export-menu>
+                                    <a href="{{ route('user.us-business.export.csv', request()->query()) }}">
+                                        <i class="fa-solid fa-file-csv"></i>
+                                        CSV
+                                    </a>
+                                    <a href="{{ route('user.us-business.export.xlsx', request()->query()) }}">
+                                        <i class="fa-solid fa-file-excel"></i>
+                                        Excel
+                                    </a>
+                                </div>
+                            </div>
+
+                            <button type="button" class="sg-action" data-modal-open="columnsModal">
+                                <i class="fa-solid fa-table-columns"></i>
+                                <span>Columns</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <button type="button" class="sg-column-btn" data-modal-open="columnsModal">
-                <i class="fa-solid fa-ellipsis"></i>
-            </button>
+            <div class="sg-top-toolbar-right">
+                <form method="GET" action="{{ url()->current() }}" class="sg-per-page-form">
+                    @foreach(request()->except('per_page', 'page') as $key => $value)
+                        @if(is_array($value))
+                            @foreach($value as $subValue)
+                                <input type="hidden" name="{{ $key }}[]" value="{{ $subValue }}">
+                            @endforeach
+                        @else
+                            <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                        @endif
+                    @endforeach
+
+                    <label for="per_page">Show</label>
+                    <select name="per_page" id="per_page" onchange="this.form.submit()">
+                        <option value="12" {{ (int) $perPage === 12 ? 'selected' : '' }}>12</option>
+                        <option value="30" {{ (int) $perPage === 30 ? 'selected' : '' }}>30</option>
+                        <option value="50" {{ (int) $perPage === 50 ? 'selected' : '' }}>50</option>
+                        <option value="100" {{ (int) $perPage === 100 ? 'selected' : '' }}>100</option>
+                    </select>
+                </form>
+            </div>
         </div>
     </div>
