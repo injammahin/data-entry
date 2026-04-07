@@ -19,8 +19,8 @@ class AdminUserSeeder extends Seeder
         // Create an admin user
         DB::table('users')->insert([
             'name' => 'Admin User',
-            'email' => 'admin@example.com', // Change to your preferred email
-            'password' => Hash::make('password'), // Change to your preferred password
+            'email' => 'mahin@gmail.com', // Change to your preferred email
+            'password' => Hash::make('Mahin@5507'), // Change to your preferred password
             'role' => 'admin', // Assuming you have a role column in your users table
             'remember_token' => Str::random(10),
         ]);
