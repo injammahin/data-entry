@@ -39,38 +39,50 @@ class ProcessCsvImportJob implements ShouldQueue
 
         $filePath = storage_path('app/' . $import->file_name);
 
-        if (!file_exists($filePath)) {
-            $import->update([
-                'status' => 'failed',
-                'error_message' => 'CSV file not found.',
-                'completed_at' => now(),
-            ]);
+        if (! file_exists($filePath)) {
+            $this->markFailed($import, 'CSV file not found.');
+            return;
+        }
+
+        // Heavy work moved to background job
+        $fileHash = hash_file('sha256', $filePath);
+
+        if ($fileHash === false) {
+            $this->markFailed($import, 'Unable to generate file hash.');
+            return;
+        }
+
+        $duplicateExists = Import::where('state_id', $import->state_id)
+            ->where('file_hash', $fileHash)
+            ->where('id', '!=', $import->id)
+            ->exists();
+
+        if ($duplicateExists) {
+            $this->markFailed($import, 'This same file has already been uploaded for the selected state.');
             return;
         }
 
         $handle = fopen($filePath, 'r');
+
         if ($handle === false) {
-            $import->update([
-                'status' => 'failed',
-                'error_message' => 'Unable to open CSV file.',
-                'completed_at' => now(),
-            ]);
+            $this->markFailed($import, 'Unable to open CSV file.');
             return;
         }
 
         $headers = fgetcsv($handle);
-        if (!$headers || count($headers) === 0) {
+
+        if (! $headers || count($headers) === 0) {
             fclose($handle);
-            $import->update([
-                'status' => 'failed',
-                'error_message' => 'CSV header row is missing or invalid.',
-                'completed_at' => now(),
-            ]);
+            $this->markFailed($import, 'CSV header row is missing or invalid.');
             return;
         }
 
         $headers = $this->normalizeHeaders($headers);
-        $import->update(['headers' => $headers]);
+
+        $import->update([
+            'file_hash' => $fileHash,
+            'headers' => $headers,
+        ]);
 
         $batch = [];
         $processed = 0;
@@ -78,7 +90,7 @@ class ProcessCsvImportJob implements ShouldQueue
         $skipped = 0;
         $total = 0;
         $rowNumber = 1;
-        $chunkSize = 1000; // Adjust the chunk size to optimize database performance
+        $chunkSize = 1000;
 
         while (($row = fgetcsv($handle)) !== false) {
             $rowNumber++;
@@ -96,6 +108,7 @@ class ProcessCsvImportJob implements ShouldQueue
             }
 
             $combined = array_combine($headers, $row);
+
             if ($combined === false) {
                 $skipped++;
                 continue;
@@ -105,13 +118,14 @@ class ProcessCsvImportJob implements ShouldQueue
                 'state_id' => $import->state_id,
                 'import_id' => $import->id,
                 'row_number' => $rowNumber,
-                'data_json' => json_encode($combined, JSON_UNESCAPED_UNICODE),
+                'data_json' => json_encode($combined, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
 
             if (count($batch) >= $chunkSize) {
                 DB::table('records')->insert($batch);
+
                 $successful += count($batch);
 
                 $import->update([
@@ -121,12 +135,11 @@ class ProcessCsvImportJob implements ShouldQueue
                     'total_rows' => $total,
                 ]);
 
-                $batch = []; // Reset batch after inserting
+                $batch = [];
             }
         }
 
-        // Insert remaining records after loop
-        if (!empty($batch)) {
+        if (! empty($batch)) {
             DB::table('records')->insert($batch);
             $successful += count($batch);
         }
@@ -147,19 +160,24 @@ class ProcessCsvImportJob implements ShouldQueue
     {
         $cleaned = [];
         $used = [];
+
         foreach ($headers as $index => $header) {
             $header = trim((string) $header);
+
             if ($header === '') {
                 $header = 'column_' . ($index + 1);
             }
+
             $header = preg_replace('/\s+/', '_', $header);
             $header = preg_replace('/[^A-Za-z0-9_\-]/', '', $header);
+
             if ($header === '') {
                 $header = 'column_' . ($index + 1);
             }
 
             $base = $header;
             $counter = 2;
+
             while (in_array($header, $used, true)) {
                 $header = $base . '_' . $counter;
                 $counter++;
@@ -168,6 +186,7 @@ class ProcessCsvImportJob implements ShouldQueue
             $used[] = $header;
             $cleaned[] = $header;
         }
+
         return $cleaned;
     }
 
@@ -178,12 +197,23 @@ class ProcessCsvImportJob implements ShouldQueue
                 return false;
             }
         }
+
         return true;
+    }
+
+    protected function markFailed(Import $import, string $message): void
+    {
+        $import->update([
+            'status' => 'failed',
+            'error_message' => $message,
+            'completed_at' => now(),
+        ]);
     }
 
     public function failed(Throwable $exception): void
     {
         $import = Import::find($this->importId);
+
         if ($import) {
             $import->update([
                 'status' => 'failed',

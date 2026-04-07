@@ -1,0 +1,1 @@
+/usr/local/bin/php artisan records:build-search-index --chunk=1000

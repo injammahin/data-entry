@@ -22,6 +22,7 @@ class ImportController extends Controller
     public function create()
     {
         $states = State::orderBy('name')->get();
+
         return view('admin.imports.create', compact('states'));
     }
 
@@ -33,76 +34,55 @@ class ImportController extends Controller
         ]);
 
         $file = $request->file('csv_file');
+
+        // Only store file here. Do not hash/check/process here.
         $path = $file->store('imports');
-        $fullPath = storage_path('app/' . $path);
 
-        // Generate the file hash for checking if the file already exists
-        $fileHash = hash_file('sha256', $fullPath);
-
-        // Check if the file is already uploaded for the same state
-        $existingImport = Import::where('state_id', $request->state_id)
-            ->where('file_hash', $fileHash)
-            ->first();
-
-        if ($existingImport) {
-            return back()->withErrors([
-                'csv_file' => 'This same file has already been uploaded for the selected state.',
-            ])->withInput();
-        }
-
-        // Open the file to verify headers
-        $handle = fopen($fullPath, 'r');
-        if ($handle === false) {
-            return back()->withErrors([
-                'csv_file' => 'Unable to open uploaded file.',
-            ])->withInput();
-        }
-
-        $headers = fgetcsv($handle);
-        fclose($handle);
-
-        if (!$headers || count($headers) === 0) {
-            return back()->withErrors([
-                'csv_file' => 'CSV header row is missing or invalid.',
-            ])->withInput();
-        }
-
-        $headers = array_map(fn ($header) => trim((string) $header), $headers);
-
-        // Create the import entry
         $import = Import::create([
-            'state_id' => $request->state_id,
+            'state_id' => (int) $request->state_id,
             'file_name' => $path,
             'original_name' => $file->getClientOriginalName(),
-            'file_hash' => $fileHash,
-            'headers' => $headers,
+            'file_hash' => '',
+            'headers' => [],
             'status' => 'pending',
+            'processed_rows' => 0,
+            'successful_rows' => 0,
+            'skipped_rows' => 0,
+            'total_rows' => 0,
+            'error_message' => null,
+            'started_at' => null,
+            'completed_at' => null,
             'created_by' => auth()->id(),
         ]);
 
-        // Dispatch the job to process the CSV file
         ProcessCsvImportJob::dispatch($import->id);
 
         return redirect()
             ->route('admin.imports.index')
-            ->with('success', 'CSV uploaded successfully. Import job started.');
+            ->with('success', 'CSV uploaded successfully. Import has been queued for background processing.');
     }
 
     public function show(Import $import)
     {
         $import->load('state', 'user');
         $records = $import->records()->latest()->paginate(20);
+
         return view('admin.imports.show', compact('import', 'records'));
     }
 
     public function records(Request $request, Import $import)
     {
         $perPage = (int) $request->get('per_page', 30);
-        if (!in_array($perPage, [30, 50, 100])) {
+
+        if (! in_array($perPage, [30, 50, 100], true)) {
             $perPage = 30;
         }
 
-        $records = $import->records()->orderBy('id')->paginate($perPage)->appends($request->query());
+        $records = $import->records()
+            ->orderBy('id')
+            ->paginate($perPage)
+            ->appends($request->query());
+
         $headers = is_array($import->headers) ? $import->headers : [];
 
         return view('admin.imports.records', compact('import', 'records', 'headers', 'perPage'));
@@ -110,14 +90,14 @@ class ImportController extends Controller
 
     public function retry(Import $import)
     {
-        if (!in_array($import->status, ['failed', 'completed'])) {
+        if (! in_array($import->status, ['failed', 'completed'], true)) {
             return back()->withErrors([
                 'retry' => 'Only failed or completed imports can be retried.',
             ]);
         }
 
-        // Reset records for retry
         $import->records()->delete();
+
         $import->update([
             'status' => 'pending',
             'processed_rows' => 0,
@@ -129,7 +109,6 @@ class ImportController extends Controller
             'completed_at' => null,
         ]);
 
-        // Dispatch job to process again
         ProcessCsvImportJob::dispatch($import->id);
 
         return back()->with('success', 'Import retry started.');
